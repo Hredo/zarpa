@@ -1,0 +1,49 @@
+# Herramientas de IA locales (como en globalhoopstats): las skills se instalan
+# por proyecto pero no se versionan.
+/.claude/
+
+# App (Expo)
+app/node_modules/
+app/.expo/
+app/dist/
+app/web-build/
+app/android/
+app/ios/
+app/*.apk
+app/*.aab
+app/expo-env.d.ts
+app/.metro-health-check*
+app/npm-debug.*
+app/*.jks
+app/*.p8
+app/*.p12
+app/*.key
+app/*.mobileprovision
+app/*.orig.*
+app/coverage/
+
+# Datos y modelos: se regeneran con tools/. Lo que la app necesita empaquetado
+# se copia a app/assets/ con su propio nombre.
+tools/.venv/
+tools/cache/
+tools/out/
+tools/external/
+tools/logs/
+tools/models/
+__pycache__/
+*.pyc
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example
+
+# El catálogo se genera con tools/ (`uv run python -m zarpa_data build`) y pesa
+# decenas de MB: no se versiona en git; viaja con cada APK y en las releases.
+app/assets/db/*.db
+
+# Ajustes locales de Claude Code de la plantilla
+app/.claude/

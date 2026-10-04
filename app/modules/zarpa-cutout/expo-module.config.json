@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ZarpaCutoutModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.zarpacutout.ZarpaCutoutModule"]
+  }
+}

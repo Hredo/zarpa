@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.hrval.zarpa'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.zarpacutout"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // Recorte del sujeto de ML Kit (Google Play services). El modelo no va en el
+  // APK: lo descarga Play services la primera vez, y `prepare()` lo pide al
+  // arrancar para que esté listo antes del primer fichaje. Sin Play services
+  // (p. ej. móviles Huawei sin GMS) el recorte falla y la pegatina usa la foto
+  // recortada en cuadrado: el avistamiento se guarda igual.
+  implementation 'com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1'
+}

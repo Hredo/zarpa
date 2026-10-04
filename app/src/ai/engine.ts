@@ -1,0 +1,163 @@
+import { Asset } from 'expo-asset';
+import { File } from 'expo-file-system';
+import {
+  createImageEmbedder,
+  createObjectDetector,
+  download,
+  models,
+  setTelemetryEnabled,
+  type ImageEmbedder,
+  type ObjectDetector,
+} from 'react-native-executorch';
+import { create } from 'zustand';
+
+import { catalog } from '@/db';
+import { COUNTRY_MIN_OBS } from '@/db/query';
+
+import { SPECIES_MODEL, type ModelSource } from './config';
+import { decide, softmax, type Lineage, type Verdict } from './decision';
+import { l2normalize, parseIndex, scoreCandidates, type SpeciesIndex } from './speciesIndex';
+
+/*
+ * Motor de reconocimiento: carga los modelos una vez y los comparte con el visor.
+ *
+ * Todo lo que puede fallar en un móvil concreto (sin ExecuTorch para su CPU,
+ * sin espacio, sin red al descargar) deja el motor en un estado explícito que
+ * el visor enseña. Nunca se «finge» un reconocimiento.
+ */
+
+export type Load = 'idle' | 'loading' | 'ready' | 'missing' | 'error';
+
+type State = {
+  detector: Load;
+  detectorProgress: number;
+  species: Load;
+  speciesProgress: number;
+  error: string | null;
+};
+
+export const useAI = create<State>(() => ({
+  detector: 'idle',
+  detectorProgress: 0,
+  species: 'idle',
+  speciesProgress: 0,
+  error: null,
+}));
+
+type Detector = ObjectDetector<'xyxy', string>;
+
+let detector: Detector | null = null;
+let embedder: ImageEmbedder | null = null;
+let index: SpeciesIndex | null = null;
+let lineages: Map<number, Lineage> | null = null;
+let started = false;
+
+/** El detector, si está listo (lo usa el hilo de la cámara). */
+export const getDetector = () => detector;
+/** El codificador de especies, si está listo. */
+export const getEmbedder = () => embedder;
+
+export async function startAI(): Promise<void> {
+  if (started) return;
+  started = true;
+  // Las analíticas de descargas de la biblioteca van activadas por defecto; la
+  // app no manda nada a terceros que el usuario no haya pedido.
+  setTelemetryEnabled(false);
+  await Promise.all([loadDetector(), loadSpecies()]);
+}
+
+async function loadDetector() {
+  useAI.setState({ detector: 'loading' });
+  try {
+    const config = models.objectDetection.RFDETR_NANO.DEFAULT;
+    const local = await download(config, {
+      onProgress: (p) => useAI.setState({ detectorProgress: p }),
+    });
+    detector = (await createObjectDetector(local)) as unknown as Detector;
+    useAI.setState({ detector: 'ready', detectorProgress: 1 });
+  } catch (e) {
+    useAI.setState({ detector: 'error', error: describe(e) });
+  }
+}
+
+async function loadSpecies() {
+  if (!SPECIES_MODEL) {
+    useAI.setState({ species: 'missing' });
+    return;
+  }
+  useAI.setState({ species: 'loading' });
+  try {
+    const [encoderPath, indexPath] = await Promise.all([
+      resolveSource(SPECIES_MODEL.encoder, (p) => useAI.setState({ speciesProgress: p * 0.8 })),
+      resolveSource(SPECIES_MODEL.index, (p) => useAI.setState({ speciesProgress: 0.8 + p * 0.2 })),
+    ]);
+    embedder = await createImageEmbedder({
+      modelPath: encoderPath,
+      // La normalización de CLIP y la L2 van dentro del modelo exportado: la
+      // biblioteca solo divide entre 255 (ver tools/zarpa_models/export_pte.py).
+      modelOpts: { resizeMode: 'stretch', interpolation: 'linear', normalizeOpts: { alpha: 1 / 255, beta: 0 } },
+    });
+    const buffer = await new File(indexPath).arrayBuffer();
+    index = parseIndex(buffer);
+    lineages = await loadLineages();
+    useAI.setState({ species: 'ready', speciesProgress: 1 });
+  } catch (e) {
+    useAI.setState({ species: 'error', error: describe(e) });
+  }
+}
+
+async function resolveSource(source: ModelSource, onProgress: (p: number) => void): Promise<string> {
+  if (source.kind === 'asset') {
+    const asset = Asset.fromModule(source.module);
+    await asset.downloadAsync();
+    onProgress(1);
+    if (!asset.localUri) throw new Error('No se pudo abrir el modelo empaquetado');
+    return asset.localUri;
+  }
+  return download(source.url, { onProgress });
+}
+
+async function loadLineages(): Promise<Map<number, Lineage>> {
+  const rows = await catalog().getAllAsync<{ id: number } & Lineage>(
+    'SELECT id, class_sci AS class, order_sci AS "order", family_sci AS family, genus_sci AS genus FROM species',
+  );
+  return new Map(rows.map((r) => [r.id, { class: r.class, order: r.order, family: r.family, genus: r.genus }]));
+}
+
+const candidateCache = new Map<string, number[]>();
+
+/**
+ * Especies posibles en un país (observadas allí al menos COUNTRY_MIN_OBS veces).
+ * Sin país, todas: menos preciso, pero nunca descarta al animal correcto.
+ */
+export async function candidatesFor(cc: string | null): Promise<number[] | undefined> {
+  if (!cc) return undefined;
+  const hit = candidateCache.get(cc);
+  if (hit) return hit;
+  const rows = await catalog().getAllAsync<{ id: number }>('SELECT id FROM country WHERE cc = ? AND obs >= ?', [
+    cc,
+    COUNTRY_MIN_OBS,
+  ]);
+  const ids = rows.map((r) => r.id);
+  // Un país sin datos (o con muy pocos) no debe dejar al motor sin candidatos.
+  if (ids.length < 50) return undefined;
+  candidateCache.set(cc, ids);
+  return ids;
+}
+
+/** Del vector de una imagen a un veredicto honesto (ver `decision.ts`). */
+export function judge(embedding: Float32Array, candidates?: number[]): Verdict | null {
+  if (!index || !lineages || !SPECIES_MODEL) return null;
+  const scored = scoreCandidates(index, l2normalize(embedding), candidates);
+  const probs = softmax(scored);
+  return decide(probs, (id) => lineages!.get(id), SPECIES_MODEL.thresholds);
+}
+
+export function speciesModelId(): string | null {
+  return SPECIES_MODEL?.id ?? null;
+}
+
+function describe(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.length > 160 ? `${msg.slice(0, 157)}…` : msg;
+}

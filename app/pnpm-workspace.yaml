@@ -1,0 +1,31 @@
+# Configuración de pnpm para la app.
+#
+# A partir de pnpm 10/11 estos ajustes van aquí y NO en .npmrc: puestos en
+# .npmrc se ignoran en silencio (lección del TFG, misma máquina, mismo Metro).
+
+# Metro y el build nativo de Gradle no resuelven el node_modules enlazado que
+# pnpm crea por defecto. Hace falta un árbol plano, como el de npm.
+nodeLinker: hoisted
+
+# En Windows el file-map de Metro llama a readlink() sobre los enlaces duros del
+# almacén de pnpm y el sistema devuelve EINVAL. Copiar ocupa más disco, pero es
+# lo único que empaqueta de forma fiable en esta máquina.
+packageImportMethod: copy
+
+# pnpm bloquea los scripts de postinstall salvo los que se permiten aquí.
+allowBuilds:
+  # Descarga en el postinstall los binarios nativos de ExecuTorch (libexecutorch,
+  # XNNPACK, Vulkan, Core ML). Sin ese paso no hay IA en el dispositivo y el
+  # build nativo falla buscando cabeceras que no existen.
+  react-native-executorch: true
+  # Resolvedor nativo de eslint-import-resolver: sin su build `pnpm lint` falla.
+  unrs-resolver: true
+  # SQLite con FTS5 para las pruebas de las consultas del Bestiario contra el
+  # catálogo real (el `node:sqlite` de Node 22 no trae FTS5). Solo desarrollo.
+  better-sqlite3: true
+  # Vigilante de ficheros de `jest --watch`. Su build nativo no compila en todas
+  # las máquinas; sin él Jest sondea y las pruebas corren igual.
+  '@parcel/watcher': false
+  # Descarga en el postinstall las bibliotecas precompiladas de Skia (sombreado
+  # holográfico de las pegatinas). Sin ellas el build nativo no enlaza.
+  '@shopify/react-native-skia': true
