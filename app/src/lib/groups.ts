@@ -79,3 +79,57 @@ export const MEDIUM = [
   { bit: 4, label: 'Marino' },
   { bit: 8, label: 'Aguas salobres' },
 ] as const;
+
+/**
+ * Ambientes, como máscara de bits (la misma tabla en
+ * tools/zarpa_data/stages/traits.py). Los tres primeros son los que más se
+ * buscan; el resto sigue el hábitat principal de AVONET y ReptTraits.
+ */
+export const ENVS = [
+  { bit: 1024, label: 'Ciudad' },
+  { bit: 2048, label: 'Granja' },
+  { bit: 4096, label: 'Selva tropical' },
+  { bit: 1, label: 'Bosque' },
+  { bit: 2, label: 'Matorral' },
+  { bit: 4, label: 'Praderas y sabanas' },
+  { bit: 8, label: 'Humedales' },
+  { bit: 16, label: 'Ríos' },
+  { bit: 32, label: 'Costa' },
+  { bit: 64, label: 'Mar' },
+  { bit: 128, label: 'Roquedos y cantiles' },
+  { bit: 256, label: 'Desierto' },
+  { bit: 512, label: 'Zonas humanizadas' },
+] as const;
+
+/** Categorías de dieta que escribe traits.py, en orden de la planta a la presa. */
+export const DIETS: { label: string; hint: string }[] = [
+  { label: 'Herbívoro', hint: 'Come sobre todo plantas' },
+  { label: 'Frugívoro', hint: 'Come sobre todo frutos' },
+  { label: 'Granívoro', hint: 'Come sobre todo semillas' },
+  { label: 'Nectarívoro', hint: 'Se alimenta sobre todo de néctar' },
+  { label: 'Invertívoro', hint: 'Come sobre todo invertebrados: insectos, arañas, gusanos…' },
+  { label: 'Carnívoro', hint: 'Come sobre todo otros vertebrados' },
+  { label: 'Piscívoro', hint: 'Come sobre todo peces' },
+  { label: 'Depredador acuático', hint: 'Caza sobre todo animales acuáticos' },
+  { label: 'Carroñero', hint: 'Se alimenta sobre todo de carroña' },
+  { label: 'Omnívoro', hint: 'Come de todo, sin un alimento dominante' },
+];
+
+export const DOMESTIC_LABEL: Record<number, string> = {
+  2: 'Animal doméstico',
+  1: 'Silvestre, con forma doméstica',
+};
+
+/** Cómo está establecida en cada país, según iNaturalist. */
+export const MEANS_LABEL: Record<string, string> = {
+  native: 'Nativa',
+  endemic: 'Endémica',
+  introduced: 'Introducida',
+};
+
+export const AUTHORITY_LABEL: Record<string, string> = {
+  fci: 'FCI',
+  fife: 'FIFe',
+  fao: 'FAO · DAD-IS',
+  mapa: 'MAPA',
+};

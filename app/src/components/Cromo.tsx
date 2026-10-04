@@ -10,6 +10,7 @@ import { IucnBadge } from './IucnBadge';
 import { Press } from './Press';
 import { TrailMark } from './TrailMark';
 import { Txt } from './Txt';
+import { expandUrl } from '@/lib/urls';
 
 export const CROMO_RATIO = 0.7;
 const BODY_H = 92;
@@ -23,8 +24,7 @@ type Props = {
 
 /** Miniatura de 330 px de Commons para listas (ancho estándar de Wikimedia). */
 export function listThumb(url: string | null): string | null {
-  if (!url) return null;
-  return url.replace(/\/960px-/, '/330px-');
+  return expandUrl(url)?.replace(/\/960px-/, '/330px-') ?? null;
 }
 
 /*

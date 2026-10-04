@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BreedLine } from '@/components/BreedLine';
 import { Icon } from '@/components/Icon';
 import { IucnBadge } from '@/components/IucnBadge';
 import { Press } from '@/components/Press';
@@ -13,8 +14,14 @@ import { TaxonLadder } from '@/components/TaxonLadder';
 import { TrailMark } from '@/components/TrailMark';
 import { Txt } from '@/components/Txt';
 import {
+  breedTotals,
+  getCities,
   getCountries,
   getImages,
+  listBreeds,
+  type Authority,
+  type BreedRow,
+  type City,
   getProvenance,
   getSources,
   getSpecies,
@@ -27,8 +34,9 @@ import {
 import { COUNTRY_MIN_OBS } from '@/db/query';
 import { COUNTRY_NAME } from '@/lib/countries';
 import { fmtAgo, fmtDate, fmtInt } from '@/lib/format';
-import { GROUP_BY_CODE, IUCN_LABEL, MEDIUM, rarityInfo } from '@/lib/groups';
-import { useLastLocation } from '@/lib/location';
+import { AUTHORITY_LABEL, DIETS, DOMESTIC_LABEL, ENVS, GROUP_BY_CODE, IUCN_LABEL, MEANS_LABEL, MEDIUM, rarityInfo } from '@/lib/groups';
+import { useLastLocation, useUserCountry } from '@/lib/location';
+import { expandUrl } from '@/lib/urls';
 import { seasonality, similarSpecies, type Fetched, type Histogram, type Similar } from '@/lib/remote';
 import { sightingsOf, useJournal, type Sighting } from '@/store/journal';
 import { radius, space, usePalette } from '@/theme';
@@ -47,7 +55,16 @@ const FIELD_LABEL: Record<string, string> = {
   repro: 'Reproducción',
   domestic: 'Doméstica',
   envs: 'Ambientes',
+  diet_detail: 'Dieta en detalle',
+  activity: 'Actividad',
+  migration: 'Migración',
 };
+
+/** Válidas para todas las especies del catálogo (build.py no las repite en cada una). */
+const BASE_PROVENANCE: Provenance[] = [
+  { field: 'taxonomy', sources: 'inat,gbif', note: null },
+  { field: 'observations', sources: 'inat', note: null },
+];
 
 export default function Ficha() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,6 +73,7 @@ export default function Ficha() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const near = useLastLocation();
+  const userCc = useUserCountry();
 
   const [sp, setSp] = useState<SpeciesDetail | null | undefined>(undefined);
   const [images, setImages] = useState<SpeciesImage[]>([]);
@@ -67,6 +85,9 @@ export default function Ficha() {
   const [season, setSeason] = useState<Fetched<Histogram> | null | undefined>(undefined);
   const [page, setPage] = useState(0);
   const [allCountries, setAllCountries] = useState(false);
+  const [breedCount, setBreedCount] = useState<Partial<Record<Authority, number>>>({});
+  const [breedPreview, setBreedPreview] = useState<{ cc: string | null; rows: BreedRow[] }>({ cc: null, rows: [] });
+  const [cities, setCities] = useState<City[]>([]);
 
   const saved = useJournal((s) => s.saved.has(speciesId));
   const caughtCount = useJournal((s) => s.caught.get(speciesId) ?? 0);
@@ -74,14 +95,32 @@ export default function Ficha() {
   const touchRecent = useJournal((s) => s.touchRecent);
 
   useEffect(() => {
-    getSpecies(speciesId).then(setSp);
+    getSpecies(speciesId).then((d) => {
+      setSp(d);
+      const ids = d?.cities ? (JSON.parse(d.cities) as [number, number][]).map(([cid]) => cid) : [];
+      getCities(ids).then(setCities);
+    });
     getImages(speciesId).then(setImages);
     getProvenance(speciesId).then(setProv);
     getSources().then(setSources);
     getCountries(speciesId).then(setCountries);
     touchRecent(speciesId).catch(() => {});
     similarSpecies(speciesId).then(setSimilar);
+    breedTotals(speciesId).then(setBreedCount);
   }, [speciesId, touchRecent]);
+
+  // Avance de razas: primero las del país del usuario, si las hay.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const local = userCc ? await listBreeds(speciesId, { cc: userCc }, 6, 0) : [];
+      const rows = local.length ? local : await listBreeds(speciesId, {}, 6, 0);
+      if (alive) setBreedPreview({ cc: local.length ? userCc : null, rows });
+    })().catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [speciesId, userCc]);
 
   useEffect(() => {
     sightingsOf(speciesId).then(setMine);
@@ -133,6 +172,9 @@ export default function Ficha() {
       .replace('{sci}', encodeURIComponent(sp.sci)) ?? null;
 
   const media = MEDIUM.filter((m) => (sp.medium & m.bit) !== 0).map((m) => m.label);
+  const envs = ENVS.filter((e) => (sp.envs & e.bit) !== 0).map((e) => e.label);
+  const dietHint = DIETS.find((d) => d.label === sp.diet)?.hint;
+  const breedTotal = Object.values(breedCount).reduce((a, b) => a + (b ?? 0), 0);
   const peak = season?.data && season.data.total > 0 ? peakMonths(season.data.months) : null;
 
   return (
@@ -149,7 +191,7 @@ export default function Ficha() {
               {images.map((im) => (
                 <Image
                   key={im.rank}
-                  source={im.url}
+                  source={expandUrl(im.url)}
                   style={{ width, height: heroH }}
                   contentFit="cover"
                   transition={200}
@@ -183,7 +225,7 @@ export default function Ficha() {
         </View>
         {images[page] && (
           <Press
-            onPress={() => images[page].page && WebBrowser.openBrowserAsync(images[page].page!)}
+            onPress={() => images[page].page && WebBrowser.openBrowserAsync(expandUrl(images[page].page)!)}
             style={[styles.credit, { borderBottomColor: palette.line }]}>
             <Txt variant="small" tone="faint" numberOfLines={2}>
               Foto: {images[page].author ?? 'autor sin indicar'} · {images[page].license ?? 'licencia libre'} ·{' '}
@@ -291,14 +333,54 @@ export default function Ficha() {
             <TaxonLadder rungs={rungs} />
           </Section>
 
-          {(media.length > 0 || sp.diet || sp.repro || sp.domestic) && (
-            <Section title="Datos verificados">
+          {(media.length > 0 || envs.length > 0 || sp.diet || sp.diet_detail || sp.repro || sp.activity || sp.migration || sp.domestic > 0) && (
+            <Section title="Cómo vive">
               <View style={styles.facts}>
+                {sp.domestic > 0 && <Fact label="Tipo" value={DOMESTIC_LABEL[sp.domestic]} />}
                 {media.length > 0 && <Fact label="Medio" value={media.join(' · ')} />}
+                {envs.length > 0 && <Fact label="Ambientes" value={envs.join(' · ')} />}
                 {sp.diet && <Fact label="Alimentación" value={sp.diet} />}
                 {sp.repro && <Fact label="Reproducción" value={sp.repro} />}
-                {sp.domestic ? <Fact label="Origen" value="Especie doméstica" /> : null}
+                {sp.activity && <Fact label="Actividad" value={sp.activity} />}
+                {sp.migration && <Fact label="Migración" value={sp.migration} />}
               </View>
+              {cities.length > 0 ? (
+                <Txt variant="small" tone="soft" style={{ marginTop: space.md }}>
+                  {`Se deja ver en el centro de ${cityList(cities, sp.cities_n ?? cities.length)}: al menos 10 observaciones humanas en GBIF en los 8 × 8 km del casco urbano.`}
+                </Txt>
+              ) : null}
+              {dietHint || sp.diet_detail ? (
+                <Txt variant="small" tone="soft" style={{ marginTop: space.md }}>
+                  {[dietHint, sp.diet_detail ? `Dieta según EltonTraits: ${sp.diet_detail}.` : null].filter(Boolean).join('. ')}
+                </Txt>
+              ) : null}
+            </Section>
+          )}
+
+          {breedTotal > 0 && (
+            <Section
+              title="Razas"
+              aside={
+                <Txt variant="data" tone="faint">
+                  {fmtInt(breedTotal)} reconocidas
+                </Txt>
+              }>
+              <Txt variant="body" tone="soft" style={{ marginBottom: space.sm }}>
+                {breedPreview.cc
+                  ? `Algunas de ${COUNTRY_NAME[breedPreview.cc] ?? breedPreview.cc}. `
+                  : ''}
+                Fuente: {(Object.keys(breedCount) as Authority[]).map((a) => AUTHORITY_LABEL[a]).join(', ')}.
+              </Txt>
+              {breedPreview.rows.map((b) => (
+                <BreedLine key={b.id} breed={b} onPress={(bid) => router.push({ pathname: '/raza/[id]', params: { id: bid } })} />
+              ))}
+              {breedTotal > breedPreview.rows.length && (
+                <Press
+                  onPress={() => router.push({ pathname: '/razas/[id]', params: { id: String(sp.id) } })}
+                  style={styles.textBtn}>
+                  <Txt variant="label">{`Ver las ${fmtInt(breedTotal)} razas`}</Txt>
+                </Press>
+              )}
             </Section>
           )}
 
@@ -367,13 +449,21 @@ export default function Ficha() {
                 </Press>
               }>
               <Txt variant="body" tone="soft" style={{ marginBottom: space.md }}>
-                Países con al menos {COUNTRY_MIN_OBS} observaciones humanas registradas en GBIF.
+                Países con al menos {COUNTRY_MIN_OBS} observaciones humanas registradas en GBIF. Nativa, endémica o
+                introducida, según iNaturalist, cuando lo indica.
               </Txt>
               {shownCountries.map((c) => (
                 <View key={c.cc} style={styles.countryRow}>
-                  <Txt variant="body" style={styles.countryName} numberOfLines={1}>
-                    {COUNTRY_NAME[c.cc] ?? c.cc}
-                  </Txt>
+                  <View style={styles.countryName}>
+                    <Txt variant="body" numberOfLines={1}>
+                      {COUNTRY_NAME[c.cc] ?? c.cc}
+                    </Txt>
+                    {c.means ? (
+                      <Txt variant="data" tone={c.means === 'introduced' ? 'trailRed' : 'faint'}>
+                        {MEANS_LABEL[c.means]}
+                      </Txt>
+                    ) : null}
+                  </View>
                   <View style={[styles.barTrack, { backgroundColor: palette.surfaceAlt }]}>
                     <View
                       style={[
@@ -400,7 +490,7 @@ export default function Ficha() {
               Cada dato de esta ficha viene de su autoridad o de dos fuentes que coinciden. Lo que no cumple eso no se
               muestra.
             </Txt>
-            {prov
+            {[...BASE_PROVENANCE, ...prov]
               .filter((p) => p.sources)
               .map((p) => (
                 <View key={p.field} style={[styles.provRow, { borderBottomColor: palette.line }]}>
@@ -437,6 +527,13 @@ export default function Ficha() {
       </ScrollView>
     </View>
   );
+}
+
+function cityList(cities: City[], total: number): string {
+  const names = cities.slice(0, 4).map((c) => c.name);
+  const rest = total - names.length;
+  if (rest > 0) return `${names.join(', ')} y ${rest === 1 ? 'otra gran ciudad' : `${rest} grandes ciudades más`}`;
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} y ${names[names.length - 1]}` : names[0];
 }
 
 function trimSummary(text: string): string {
@@ -548,7 +645,7 @@ const styles = StyleSheet.create({
   barLabel: { flex: 1, textAlign: 'center', fontSize: 11 },
   similar: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md, borderBottomWidth: StyleSheet.hairlineWidth },
   inlineBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: space.xs },
-  countryRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, height: 32 },
+  countryRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 36, paddingVertical: 2 },
   countryName: { width: 128 },
   barTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },

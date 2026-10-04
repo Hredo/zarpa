@@ -4,11 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BreedLine } from '@/components/BreedLine';
 import { Cromo } from '@/components/Cromo';
 import { Icon } from '@/components/Icon';
 import { Press } from '@/components/Press';
 import { Txt } from '@/components/Txt';
-import { groupTotals, type SpeciesRow } from '@/db/catalog';
+import { groupTotals, searchBreeds, type BreedRow, type SpeciesRow } from '@/db/catalog';
 import { CATALOG_SPECIES } from '@/db/catalogAsset';
 import { activeFilterCount } from '@/db/query';
 import { fmtInt } from '@/lib/format';
@@ -33,6 +34,25 @@ export default function Bestiario() {
   useEffect(() => {
     groupTotals().then((g) => setTotals(Object.fromEntries(g.map((x) => [x.code, x.total]))));
   }, []);
+
+  // Razas que coinciden con la búsqueda («pastor alemán», «frisona»…): llevan a
+  // su ficha oficial; la especie aparece además entre los cromos.
+  const [breedHits, setBreedHits] = useState<{ q: string; rows: (BreedRow & { species_name: string | null })[] }>({ q: '', rows: [] });
+  useEffect(() => {
+    const q = filters.q.trim();
+    if (q.length < 3) return;
+    let alive = true;
+    const t = setTimeout(() => {
+      searchBreeds(q, 4).then((rows) => {
+        if (alive) setBreedHits({ q, rows });
+      });
+    }, 220);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [filters.q]);
+  const shownBreeds = breedHits.q === filters.q.trim() ? breedHits.rows : [];
 
   const columns = width >= 700 ? 3 : 2;
   const cardW = Math.floor((width - GUTTER * 2 - GAP * (columns - 1)) / columns);
@@ -110,6 +130,22 @@ export default function Bestiario() {
           )}
         </Press>
       </View>
+
+      {shownBreeds.length > 0 && (
+        <View style={[styles.breeds, { paddingHorizontal: GUTTER }]}>
+          <Txt variant="label" tone="soft">
+            Razas
+          </Txt>
+          {shownBreeds.map((b) => (
+            <View key={b.id}>
+              <BreedLine breed={b} onPress={(bid) => router.push({ pathname: '/raza/[id]', params: { id: bid } })} />
+              <Txt variant="data" tone="faint" style={styles.breedOf}>
+                {b.species_name}
+              </Txt>
+            </View>
+          ))}
+        </View>
+      )}
 
       <View style={[styles.resultRow, { paddingHorizontal: GUTTER }]}>
         <Txt variant="small" tone="faint">
@@ -228,5 +264,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   resultRow: { paddingTop: space.md, paddingBottom: space.md },
+  breeds: { paddingTop: space.lg },
+  breedOf: { marginTop: -space.sm, marginBottom: space.xs, marginLeft: 56 + space.md },
   empty: { borderWidth: 1, borderStyle: 'dashed', borderRadius: radius.lg, padding: space.xl, gap: space.sm },
 });

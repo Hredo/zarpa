@@ -59,3 +59,26 @@ export async function placeName(c: { lat: number; lng: number }): Promise<string
     return null;
   }
 }
+
+/**
+ * País del usuario a partir de la última posición conocida, sin pedir permiso.
+ * `null` mientras no se sabe (o si nunca concedió la ubicación).
+ */
+export function useUserCountry(): string | null {
+  const coords = useLastLocation();
+  const [found, setFound] = useState<{ at: string; cc: string | null } | null>(null);
+  const at = coords ? `${coords.lat.toFixed(2)},${coords.lng.toFixed(2)}` : '';
+  useEffect(() => {
+    if (!coords) return;
+    let alive = true;
+    countryOf(coords).then((cc) => {
+      if (alive) setFound({ at, cc });
+    });
+    return () => {
+      alive = false;
+    };
+    // Solo cambia de país si la posición cambia de verdad (dos decimales).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at]);
+  return found && found.at === at ? found.cc : null;
+}

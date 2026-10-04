@@ -11,7 +11,7 @@ import { Icon } from '@/components/Icon';
 import { Press } from '@/components/Press';
 import { TrailMark } from '@/components/TrailMark';
 import { Txt } from '@/components/Txt';
-import { getSpecies, type SpeciesDetail } from '@/db/catalog';
+import { getBreed, getSpecies, type Breed, type SpeciesDetail } from '@/db/catalog';
 import { fmt1, fmtCoords, fmtDate, fmtTime } from '@/lib/format';
 import { rarityInfo } from '@/lib/groups';
 import { getSighting, sightingsOf, useJournal, type Sighting } from '@/store/journal';
@@ -27,12 +27,14 @@ export default function Avistamiento() {
   const [s, setS] = useState<Sighting | null | undefined>(undefined);
   const [sp, setSp] = useState<SpeciesDetail | null>(null);
   const [firstOfSpecies, setFirstOfSpecies] = useState(false);
+  const [breed, setBreed] = useState<Breed | null>(null);
 
   useEffect(() => {
     getSighting(id).then(async (row) => {
       setS(row);
       if (row?.species_id != null) {
         setSp(await getSpecies(row.species_id));
+        if (row.breed_id) setBreed(await getBreed(row.breed_id));
         const all = await sightingsOf(row.species_id);
         setFirstOfSpecies(all.length === 1);
       }
@@ -130,6 +132,7 @@ export default function Avistamiento() {
 
           <View style={[styles.label, { backgroundColor: palette.surface, borderColor: palette.line }]}>
             <Line k="Fecha" v={`${fmtDate(s.created_at)}, ${fmtTime(s.created_at)}`} />
+            {breed ? <Line k="Raza (según tú)" v={breed.name} /> : null}
             {s.place ? <Line k="Lugar" v={s.place} /> : null}
             {s.lat != null && s.lng != null ? <Line k="Coordenadas" v={fmtCoords(s.lat, s.lng)} mono /> : null}
             <Line

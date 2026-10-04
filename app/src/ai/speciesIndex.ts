@@ -10,7 +10,11 @@
  *   8   uint32 dimensión D
  *   12  uint32 número de especies N
  *   16  float32 escala del logit (la temperatura calibrada ya aplicada)
- *   20  int32[N]  id de especie (taxón de iNaturalist, igual que el catálogo)
+ *   — solo versión 2 (índice comprimido por SVD):
+ *   20  uint32 dimensión original S del vector de imagen
+ *   24  float32[S*D] base de la proyección (fila a fila: S filas de D)
+ *   —
+ *   ..  int32[N]  id de especie (taxón de iNaturalist, igual que el catálogo)
  *   ..  float32[N] escala de cuantización de cada vector
  *   ..  int8[N*D] vectores normalizados y cuantizados (v ≈ q * escala)
  *
@@ -22,6 +26,9 @@
 export type SpeciesIndex = {
   version: number;
   dim: number;
+  /** Versión 2: el vector de imagen se proyecta de `srcDim` a `dim` dimensiones. */
+  srcDim: number;
+  basis: Float32Array | null;
   count: number;
   logitScale: number;
   ids: Int32Array;
@@ -41,6 +48,16 @@ export function parseIndex(buffer: ArrayBuffer): SpeciesIndex {
   const count = view.getUint32(12, true);
   const logitScale = view.getFloat32(16, true);
   let offset = 20;
+  let srcDim = dim;
+  let basis: Float32Array | null = null;
+  if (version === 2) {
+    srcDim = view.getUint32(20, true);
+    offset = 24;
+    basis = new Float32Array(buffer.slice(offset, offset + srcDim * dim * 4));
+    offset += srcDim * dim * 4;
+  } else if (version !== 1) {
+    throw new Error(`Índice de especies de una versión desconocida (${version})`);
+  }
   const ids = new Int32Array(buffer.slice(offset, offset + count * 4));
   offset += count * 4;
   const scales = new Float32Array(buffer.slice(offset, offset + count * 4));
@@ -49,7 +66,7 @@ export function parseIndex(buffer: ArrayBuffer): SpeciesIndex {
   if (offset + count * dim > buffer.byteLength) throw new Error('Índice de especies truncado');
   const position = new Map<number, number>();
   for (let i = 0; i < count; i++) position.set(ids[i], i);
-  return { version, dim, count, logitScale, ids, scales, vectors, position };
+  return { version, dim, srcDim, basis, count, logitScale, ids, scales, vectors, position };
 }
 
 export type Scored = { id: number; logit: number };
@@ -80,6 +97,25 @@ export function scoreCandidates(index: SpeciesIndex, embedding: Float32Array, ca
     for (let row = 0; row < index.count; row++) out.push({ id: ids[row], logit: score(row) });
   }
   return out;
+}
+
+/**
+ * Vector de la imagen listo para comparar con el índice: normalizado y, si el
+ * índice está comprimido (versión 2), proyectado a sus dimensiones y vuelto a
+ * normalizar.
+ */
+export function prepareQuery(index: SpeciesIndex, embedding: Float32Array): Float32Array {
+  const v = l2normalize(embedding);
+  if (!index.basis) return v;
+  const { srcDim, dim, basis } = index;
+  const out = new Float32Array(dim);
+  for (let s = 0; s < srcDim; s++) {
+    const x = v[s];
+    if (x === 0) continue;
+    const row = s * dim;
+    for (let k = 0; k < dim; k++) out[k] += x * basis[row + k];
+  }
+  return l2normalize(out);
 }
 
 /** Normaliza a longitud 1 (el modelo exportado ya lo hace; esto es la red de seguridad). */

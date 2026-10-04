@@ -10,7 +10,16 @@ const tf = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit'
 
 export const fmtInt = (n: number) => nf.format(n);
 export const fmt1 = (n: number) => nf1.format(n);
-export const fmtDate = (iso: string) => df.format(new Date(iso));
+export const fmtDate = (iso: string) => df.format(parseDate(iso));
+
+/**
+ * «1955-01-01» es un día del calendario, no un instante: `new Date()` lo leería
+ * como medianoche UTC y en América saldría el 31 de diciembre de 1954.
+ */
+function parseDate(iso: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
+}
 export const fmtTime = (iso: string) => tf.format(new Date(iso));
 
 export function fmtPercent(fraction: number): string {

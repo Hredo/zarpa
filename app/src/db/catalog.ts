@@ -1,15 +1,19 @@
 import { catalog, journal } from './index';
 import {
+  BREED_COLUMNS,
+  breedWhere,
   buildCountQuery,
   buildListQuery,
   LIST_COLUMNS,
+  type Authority,
+  type BreedQuery,
   type Context,
   type Filters,
   type SortKey,
   type SpeciesRow,
 } from './query';
 
-export type { SpeciesRow } from './query';
+export type { Authority, BreedQuery, SpeciesRow } from './query';
 
 export type SpeciesDetail = SpeciesRow & {
   class_sci: string | null;
@@ -34,6 +38,12 @@ export type SpeciesDetail = SpeciesRow & {
   summary_lang: string | null;
   summary_src: string | null;
   aliases_es: string | null;
+  diet_detail: string | null;
+  activity: string | null;
+  migration: string | null;
+  /** JSON [[id de ciudad, observaciones], …] */
+  cities: string | null;
+  cities_n: number | null;
 };
 
 export type SpeciesImage = {
@@ -78,8 +88,8 @@ export async function countSpecies(f: Filters, ctx: Context): Promise<number> {
 
 export async function getSpecies(id: number): Promise<SpeciesDetail | null> {
   return catalog().getFirstAsync<SpeciesDetail>(
-    `SELECT s.*, d.summary, d.summary_lang, d.summary_src, d.aliases_es
-     FROM species s LEFT JOIN detail d ON d.id = s.id WHERE s.id = ?`,
+    `SELECT s.*, d.summary, d.summary_lang, d.summary_src, d.aliases_es, d.diet_detail, d.activity, d.migration, d.cities, d.cities_n
+     FROM species_v s LEFT JOIN detail d ON d.id = s.id WHERE s.id = ?`,
     [id],
   );
 }
@@ -87,7 +97,7 @@ export async function getSpecies(id: number): Promise<SpeciesDetail | null> {
 export async function getSpeciesByIds(ids: number[]): Promise<SpeciesRow[]> {
   if (ids.length === 0) return [];
   return catalog().getAllAsync<SpeciesRow>(
-    `SELECT ${LIST_COLUMNS} FROM species s WHERE s.id IN (SELECT value FROM json_each(?))`,
+    `SELECT ${LIST_COLUMNS} FROM species_v s WHERE s.id IN (SELECT value FROM json_each(?))`,
     [JSON.stringify(ids)],
   );
 }
@@ -123,7 +133,7 @@ export async function catalogMeta(): Promise<Record<string, string>> {
 /** Especies más observadas en un país: el «qué puedes encontrar aquí». */
 export async function topInCountry(cc: string, limit: number): Promise<(SpeciesRow & { local_obs: number })[]> {
   return catalog().getAllAsync(
-    `SELECT ${LIST_COLUMNS}, c.obs AS local_obs FROM country c JOIN species s ON s.id = c.id
+    `SELECT ${LIST_COLUMNS}, c.obs AS local_obs FROM country c JOIN species_v s ON s.id = c.id
      WHERE c.cc = ? ORDER BY c.obs DESC LIMIT ?`,
     [cc, limit],
   );
@@ -138,4 +148,104 @@ export async function getAtlasSpecies(ids: number[]): Promise<AtlasSpecies[]> {
     'SELECT id, sci, name_es, name_en, gbif, img, grp FROM species WHERE id IN (SELECT value FROM json_each(?))',
     [JSON.stringify(ids)],
   );
+}
+
+/* --- Razas ------------------------------------------------------------------ */
+
+export type BreedRow = {
+  id: string;
+  species_id: number;
+  authority: Authority;
+  code: string | null;
+  name: string;
+  grp: string | null;
+  status: string | null;
+  adapt: string | null;
+  risk: string | null;
+  origin_cc: string | null;
+  origin_text: string | null;
+  countries: string | null;
+  img: string | null;
+};
+
+export type Breed = BreedRow & {
+  rid: number;
+  name_official: string | null;
+  names_other: string | null;
+  section: string | null;
+  accepted: string | null;
+  origin_place: string | null;
+  distribution: string | null;
+  varieties: string | null;
+  url: string;
+  standard_url: string | null;
+  img_ratio: number | null;
+  img_author: string | null;
+  img_license: string | null;
+  img_page: string | null;
+  wd: string | null;
+  retrieved: string | null;
+};
+
+export async function listBreeds(speciesId: number, query: BreedQuery, limit: number, offset: number): Promise<BreedRow[]> {
+  const { where, params } = breedWhere(speciesId, query);
+  return catalog().getAllAsync<BreedRow>(`SELECT ${BREED_COLUMNS} FROM breed b ${where} ORDER BY b.seq LIMIT ? OFFSET ?`, [
+    ...params,
+    limit,
+    offset,
+  ]);
+}
+
+export async function countBreeds(speciesId: number, query: BreedQuery): Promise<number> {
+  const { where, params } = breedWhere(speciesId, query);
+  const row = await catalog().getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM breed b ${where}`, params);
+  return row?.n ?? 0;
+}
+
+/** Cuántas razas tiene la especie, por autoridad. */
+export async function breedTotals(speciesId: number): Promise<Partial<Record<Authority, number>>> {
+  const rows = await catalog().getAllAsync<{ authority: Authority; n: number }>(
+    'SELECT authority, COUNT(*) AS n FROM breed WHERE species_id = ? GROUP BY authority',
+    [speciesId],
+  );
+  return Object.fromEntries(rows.map((r) => [r.authority, r.n]));
+}
+
+/** Razas por su número estable (el que usa el índice de razas de la IA), en el orden pedido. */
+export async function getBreedsByRids(rids: number[]): Promise<(BreedRow & { rid: number })[]> {
+  if (!rids.length) return [];
+  const rows = await catalog().getAllAsync<BreedRow & { rid: number }>(
+    `SELECT b.rid, ${BREED_COLUMNS} FROM breed b WHERE b.rid IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(rids)],
+  );
+  const byRid = new Map(rows.map((r) => [r.rid, r]));
+  return rids.map((r) => byRid.get(r)).filter((r): r is BreedRow & { rid: number } => !!r);
+}
+
+export async function getBreed(id: string): Promise<Breed | null> {
+  return catalog().getFirstAsync<Breed>('SELECT * FROM breed WHERE id = ?', [id]);
+}
+
+/** Razas de cualquier especie que coinciden con la búsqueda del Bestiario. */
+export async function searchBreeds(q: string, limit: number): Promise<(BreedRow & { species_name: string | null })[]> {
+  const { where, params } = breedWhere(null, { q });
+  if (!where) return [];
+  return catalog().getAllAsync(
+    `SELECT ${BREED_COLUMNS}, COALESCE(s.name_es, s.sci) AS species_name
+     FROM breed b JOIN species s ON s.id = b.species_id ${where} ORDER BY b.seq LIMIT ?`,
+    [...params, limit],
+  );
+}
+
+export type City = { id: number; name: string; cc: string };
+
+/** Ciudades (de la etapa urban) por id, en el orden pedido. */
+export async function getCities(ids: number[]): Promise<City[]> {
+  if (!ids.length) return [];
+  const rows = await catalog().getAllAsync<City>(
+    'SELECT id, name, cc FROM city WHERE id IN (SELECT value FROM json_each(?))',
+    [JSON.stringify(ids)],
+  );
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.map((i) => byId.get(i)).filter((c): c is City => !!c);
 }

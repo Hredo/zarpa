@@ -26,6 +26,8 @@ export type CaptureResult = {
   cropUri: string;
   stickerUri: string | null;
   verdict: Verdict | null;
+  /** Vector de la foto recortada (para sugerir la raza sin volver a calcularlo). */
+  embedding: Float32Array | null;
   /** Caja del animal en la foto, normalizada (0–1). */
   box: Box;
 };
@@ -99,11 +101,12 @@ export async function processCapture(
   await crop.saveToFileAsync(cropFile.uri.replace('file://', ''), 'jpg', 0.92);
 
   let verdict: Verdict | null = null;
+  let embedding: Float32Array | null = null;
   const embedder = getEmbedder();
   if (embedder) {
     const buffer = toImageBuffer(await small.toRawPixelDataAsync());
     if (buffer) {
-      const embedding = await embedder.embed(buffer);
+      embedding = await embedder.embed(buffer);
       verdict = judge(embedding, candidates);
     }
   }
@@ -117,6 +120,7 @@ export async function processCapture(
     cropUri: cropFile.uri,
     stickerUri: sticker?.uri ?? null,
     verdict,
+    embedding,
     box: { x: x0 / W, y: y0 / H, w: side / W, h: side / H },
   };
 }

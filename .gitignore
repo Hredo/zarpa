@@ -9,6 +9,8 @@ app/dist/
 app/web-build/
 app/android/
 app/ios/
+app/modules/*/android/build/
+app/modules/*/android/.cxx/
 app/*.apk
 app/*.aab
 app/expo-env.d.ts
@@ -44,6 +46,10 @@ Thumbs.db
 # El catálogo se genera con tools/ (`uv run python -m zarpa_data build`) y pesa
 # decenas de MB: no se versiona en git; viaja con cada APK y en las releases.
 app/assets/db/*.db
+
+# Modelo de especies (~90 MB) e índice: los genera tools/zarpa_models (export_pte,
+# build_index, publish) y viajan con cada APK, no en git.
+app/assets/models/
 
 # Ajustes locales de Claude Code de la plantilla
 app/.claude/

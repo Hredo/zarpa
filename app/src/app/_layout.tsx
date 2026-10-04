@@ -52,6 +52,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="especie/[id]" />
           <Stack.Screen name="avistamiento/[id]" />
+          <Stack.Screen name="razas/[id]" />
+          <Stack.Screen name="raza/[id]" />
           {/* El visor ocupa toda la pantalla y se cierra hacia abajo, como una
               cámara del sistema: no compite con la navegación de pestañas. */}
           <Stack.Screen name="avistar" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />

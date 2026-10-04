@@ -11,6 +11,7 @@ import { Txt } from '@/components/Txt';
 import { getAtlasSpecies, type AtlasSpecies } from '@/db/catalog';
 import { fmtInt } from '@/lib/format';
 import { useLastLocation } from '@/lib/location';
+import { naturalAreasWithSpecies, tooLarge, type NaturalAreas } from '@/lib/naturalAreas';
 import { placesInBox, type PlaceCount } from '@/lib/remote';
 import { listSightings, useJournal, type Sighting } from '@/store/journal';
 import { duration, ease, radius, space, useIsDark, usePalette } from '@/theme';
@@ -20,6 +21,7 @@ type PlaceInfo = {
   total: number;
   areas: PlaceCount[];
   provinces: PlaceCount[];
+  natural: NaturalAreas | null;
 };
 
 /** Lado del recuadro consultado al tocar, según el zoom (≈ lo que ocupa el dedo). */
@@ -85,7 +87,10 @@ export default function Atlas() {
     const out: PlaceInfo[] = [];
     for (const s of hit) {
       const res = await placesInBox(s.gbif as number, box);
-      if (res && res.data.total > 0) out.push({ species: s, total: res.data.total, areas: res.data.areas, provinces: res.data.provinces });
+      if (res && res.data.total > 0) {
+        const nat = await naturalAreasWithSpecies(s.gbif as number, box);
+        out.push({ species: s, total: res.data.total, areas: res.data.areas, provinces: res.data.provinces, natural: nat?.data ?? null });
+      }
     }
     setPlaces(out);
     setLoadingPlaces(false);
@@ -192,10 +197,27 @@ export default function Atlas() {
                       {p.provinces.slice(0, 3).map((a) => a.name).join(' · ')}
                     </Txt>
                   )}
+                  {p.natural && p.natural.areas.length > 0 && (
+                    <View style={styles.natural}>
+                      {p.natural.areas.map((a) => (
+                        <Txt key={a.name} variant="small">
+                          <Txt variant="small" tone="soft">{`${a.kind}: `}</Txt>
+                          {`${a.name} · ${fmtInt(a.count)}`}
+                        </Txt>
+                      ))}
+                      <Txt variant="small" tone="faint">
+                        {p.natural.sampled < p.natural.total
+                          ? `Observaciones dentro de cada espacio, de una muestra de ${fmtInt(p.natural.sampled)} de ${fmtInt(p.natural.total)}.`
+                          : 'Observaciones dentro de cada espacio.'}
+                      </Txt>
+                    </View>
+                  )}
                 </View>
               ))}
               <Txt variant="small" tone="faint" style={{ marginTop: space.sm }}>
-                Recuento de registros humanos en GBIF dentro del recuadro tocado, agrupados por unidad administrativa (GADM).
+                Registros humanos en GBIF dentro del recuadro tocado, por municipio y provincia (GADM). Espacios naturales:
+                © OpenStreetMap.
+                {tap && tooLarge(boxAround(tap.lng, tap.lat, tap.zoom)) ? ' Acerca el mapa para ver en qué bosques y parques concretos.' : ''}
               </Txt>
             </ScrollView>
           ) : (
@@ -211,6 +233,7 @@ export default function Atlas() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  natural: { marginTop: space.xs, gap: 2 },
   header: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: space.lg, paddingBottom: space.md, borderBottomWidth: StyleSheet.hairlineWidth },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerBtns: { flexDirection: 'row', gap: space.sm },

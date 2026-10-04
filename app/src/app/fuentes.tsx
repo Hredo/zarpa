@@ -24,6 +24,12 @@ const LINKS: Record<string, string> = {
   worms: 'https://www.marinespecies.org',
 };
 
+/** Enlace de la fuente: su URL si es fija; si es una plantilla por especie, la portada. */
+function linkOf(s: Source): string | null {
+  if (s.url && !s.url.includes('{')) return s.url;
+  return LINKS[s.code] ?? null;
+}
+
 /*
  * De dónde sale cada dato y con qué reglas entra. Es la pantalla que responde
  * a «¿y esto quién lo dice?», y también la que cumple las licencias (atribución
@@ -51,7 +57,8 @@ export default function Fuentes() {
         </Txt>
         {meta.built_at ? (
           <Txt variant="data" tone="faint" style={{ marginTop: space.xs }}>
-            Catálogo de {fmtInt(Number(meta.species ?? 0))} especies · generado el {fmtDate(meta.built_at)}
+            Catálogo de {fmtInt(Number(meta.species ?? 0))} especies
+            {meta.breeds ? ` y ${fmtInt(Number(meta.breeds))} razas` : ''} · generado el {fmtDate(meta.built_at)}
           </Txt>
         ) : null}
 
@@ -79,6 +86,30 @@ export default function Fuentes() {
           </Txt>
         </Section>
 
+        <Section title="Cómo vive y dónde">
+          <Txt variant="body">
+            Dieta, reproducción, actividad y hábitat salen de bases de datos científicas revisadas por pares: AVONET y
+            EltonTraits para aves y mamíferos, ReptTraits para reptiles y AmphiBIO para anfibios. Cuando dos de ellas no
+            coinciden en la dieta de un ave, no se muestra la categoría. Si vive en el mar, en agua dulce o en tierra lo
+            dice WoRMS, el registro mundial de especies marinas, junto a esas bases.
+          </Txt>
+          <Txt variant="body" style={{ marginTop: space.md }}>
+            «Ciudad» significa que la especie tiene al menos 10 observaciones humanas en GBIF, desde el año 2000, en los
+            8 × 8 km del centro de alguna ciudad de más de un millón de habitantes (lista de GeoNames). «Granja», que tiene
+            razas de ganado registradas por la FAO o el Ministerio de Agricultura. Los filtros solo abarcan las especies
+            con el dato verificado.
+          </Txt>
+        </Section>
+
+        <Section title="Razas">
+          <Txt variant="body">
+            Solo razas reconocidas por su autoridad: la nomenclatura de la Federación Cinológica Internacional (FCI) para
+            perros, con sus nombres oficiales en español; la Federación Internacional Felina (FIFe) para gatos; y para el
+            ganado y las aves de corral, DAD-IS, la base de datos mundial de la FAO que alimenta cada país (en España, el
+            Ministerio de Agricultura, cuyo catálogo oficial completa las razas autóctonas). Las extinguidas no aparecen.
+          </Txt>
+        </Section>
+
         <Section title="El reconocimiento">
           <Txt variant="body">
             La IA corre en el móvil, sin enviar fotos a ningún servidor. Solo afirma la especie cuando su probabilidad
@@ -86,13 +117,20 @@ export default function Fuentes() {
             veces. Si no llega, dice hasta dónde está segura (familia, género…) y te deja elegir; ese avistamiento queda
             como «sin verificar».
           </Txt>
+          <Txt variant="body" style={{ marginTop: space.md }}>
+            Ese 95 % se mide con fotos de todo el mundo y es una media. Según el grupo, al nombrar el orden, la familia o
+            el género puede quedarse en el 85–90 %, sobre todo en peces, moluscos, anfibios y otros invertebrados, de los
+            que el banco de pruebas tiene menos fotos. La raza no la propone la IA, porque no llega a ese nivel de acierto:
+            la eliges tú.
+          </Txt>
         </Section>
 
         <Section title="Fuentes del catálogo">
           {sources.map((s) => (
             <Press
               key={s.code}
-              onPress={() => LINKS[s.code] && WebBrowser.openBrowserAsync(LINKS[s.code])}
+              disabled={!linkOf(s)}
+              onPress={() => linkOf(s) && WebBrowser.openBrowserAsync(linkOf(s)!)}
               style={[styles.source, { borderBottomColor: palette.line }]}>
               <View style={styles.fill}>
                 <Txt variant="bodyStrong">{s.label}</Txt>
@@ -102,7 +140,7 @@ export default function Fuentes() {
                   </Txt>
                 ) : null}
               </View>
-              <Icon name="external" size={18} color={palette.inkFaint} />
+              {linkOf(s) ? <Icon name="external" size={18} color={palette.inkFaint} /> : null}
             </Press>
           ))}
         </Section>
@@ -110,7 +148,8 @@ export default function Fuentes() {
         <Section title="Mapas">
           <Txt variant="body">
             Mapa base © OpenStreetMap y colaboradores, teselas de OpenFreeMap. Relieve: Mapzen Terrain Tiles (AWS Open
-            Data). Observaciones: GBIF.org. Lugares administrativos: GADM, a través de GBIF.
+            Data). Observaciones: GBIF.org. Lugares administrativos: GADM, a través de GBIF. Grandes ciudades: GeoNames
+            (CC BY 4.0). Bosques, parques y espacios protegidos: © colaboradores de OpenStreetMap (ODbL), vía Overpass.
           </Txt>
         </Section>
 

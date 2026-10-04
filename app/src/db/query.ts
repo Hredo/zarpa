@@ -119,8 +119,10 @@ export function buildWhere(f: Filters, ctx: Context): { where: string; params: (
     clauses.push(`s.repro IN (${f.repro.map(() => '?').join(',')})`);
     params.push(...f.repro);
   }
-  if (f.domestic === 'domestic') clauses.push('s.domestic = 1');
-  if (f.domestic === 'wild') clauses.push('s.domestic = 0');
+  // 2 = animal doméstico; 1 = especie silvestre con forma doméstica (jabalí y
+  // cerdo): cuenta en los dos filtros, porque es las dos cosas.
+  if (f.domestic === 'domestic') clauses.push('s.domestic >= 1');
+  if (f.domestic === 'wild') clauses.push('s.domestic <= 1');
   if (f.envs) {
     clauses.push('(s.envs & ?) != 0');
     params.push(f.envs);
@@ -160,7 +162,8 @@ export function buildListQuery(
   offset: number,
 ): { sql: string; params: (string | number)[] } {
   const { where, params } = buildWhere(f, ctx);
-  const sql = `SELECT ${LIST_COLUMNS} FROM species s JOIN grp g ON g.code = s.grp ${where} ${ORDER[sort]} LIMIT ? OFFSET ?`;
+  // La vista trae el nombre de la familia; el recuento no lo necesita y va a la tabla.
+  const sql = `SELECT ${LIST_COLUMNS} FROM species_v s JOIN grp g ON g.code = s.grp ${where} ${ORDER[sort]} LIMIT ? OFFSET ?`;
   return { sql, params: [...params, limit, offset] };
 }
 
@@ -183,4 +186,37 @@ export function activeFilterCount(f: Filters): number {
     (f.caught !== 'any' ? 1 : 0) +
     (f.saved ? 1 : 0)
   );
+}
+
+/* --- Razas ------------------------------------------------------------------ */
+
+export type Authority = 'fci' | 'fife' | 'fao' | 'mapa';
+
+export const BREED_COLUMNS =
+  'b.id, b.species_id, b.authority, b.code, b.name, b.grp, b.status, b.adapt, b.risk, b.origin_cc, b.origin_text, b.countries, b.img';
+
+export type BreedQuery = { q?: string; cc?: string | null; authority?: Authority | null };
+
+export function breedWhere(speciesId: number | null, query: BreedQuery): { where: string; params: (string | number)[] } {
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+  if (speciesId !== null) {
+    clauses.push('b.species_id = ?');
+    params.push(speciesId);
+  }
+  const fts = ftsQuery(query.q ?? '');
+  if (fts) {
+    clauses.push('b.rid IN (SELECT rowid FROM breed_fts WHERE breed_fts MATCH ?)');
+    params.push(fts);
+  }
+  if (query.authority) {
+    clauses.push('b.authority = ?');
+    params.push(query.authority);
+  }
+  if (query.cc) {
+    // País de origen (FCI, MAPA) o con población registrada (FAO).
+    clauses.push("(',' || COALESCE(b.origin_cc, '') || ',' || COALESCE(b.countries, '') || ',') LIKE ?");
+    params.push(`%,${query.cc},%`);
+  }
+  return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
 }

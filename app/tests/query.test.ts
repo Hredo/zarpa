@@ -56,6 +56,18 @@ describe('catálogo', () => {
     }
   });
 
+  it('las especies que GBIF agrupa en una clave no se quitan los países entre sí', () => {
+    // GBIF tiene una sola clave para Charaxes jasius (Mediterráneo) y
+    // C. epijasius (oeste de África); el catálogo cuenta cada una por su nombre.
+    const countries = (sci: string) =>
+      (db.prepare('SELECT c.cc FROM country c JOIN species s ON s.id = c.id WHERE s.sci = ?').all(sci) as { cc: string }[]).map(
+        (r) => r.cc,
+      );
+    expect(countries('Charaxes jasius')).toContain('ES');
+    expect(countries('Charaxes epijasius')).not.toContain('ES');
+    expect(countries('Charaxes epijasius').length).toBeGreaterThan(0);
+  });
+
   it('avistadas / por avistar se reparten el catálogo', () => {
     const some = list({}, 'popular', 3).map((r) => r.id);
     const c = { caughtIds: some, savedIds: [] };

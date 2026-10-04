@@ -7,17 +7,19 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTimin
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Verdict } from '@/ai/decision';
-import { speciesModelId } from '@/ai/engine';
-import { getSpeciesByIds, listSpecies, type SpeciesRow } from '@/db/catalog';
+import { judgeBreed, speciesModelId, type BreedGuess } from '@/ai/engine';
+import { getSpeciesByIds, listSpecies, type BreedRow, type SpeciesRow } from '@/db/catalog';
 import { EMPTY_FILTERS } from '@/db/query';
 import type { CaptureResult } from '@/lib/capture';
 import { discardCapture } from '@/lib/capture';
 import { fmt1 } from '@/lib/format';
 import { GROUP_BY_CODE } from '@/lib/groups';
-import { placeName, type Coords } from '@/lib/location';
+import { countryOf, placeName, type Coords } from '@/lib/location';
 import { useJournal } from '@/store/journal';
 import { duration, ease, radius, space, type, usePalette } from '@/theme';
 
+import { listThumb } from '../Cromo';
+import { BreedPicker } from './BreedPicker';
 import { Icon } from '../Icon';
 import { Press } from '../Press';
 import { TrailMark } from '../TrailMark';
@@ -61,6 +63,29 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SpeciesRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const [breed, setBreed] = useState<BreedRow | null>(null);
+  const [cc, setCc] = useState<string | null>(null);
+  const [guesses, setGuesses] = useState<{ species: number | null; top: BreedGuess[]; sure: number | null }>({
+    species: null,
+    top: [],
+    sure: null,
+  });
+
+  // Raza: solo si la IA tiene retratos de las razas de la especie elegida.
+  useEffect(() => {
+    if (!chosen || !capture.embedding) return;
+    let alive = true;
+    judgeBreed(capture.embedding, chosen).then((g) => {
+      if (alive) setGuesses({ species: chosen, top: g?.top ?? [], sure: g?.sure?.rid ?? null });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [chosen, capture.embedding]);
+
+  useEffect(() => {
+    if (coords) countryOf(coords).then(setCc);
+  }, [coords]);
 
   const verdict: Verdict | null = capture.verdict;
   const probOf = useMemo(() => new Map((verdict?.top ?? []).map((c) => [c.id, c.p])), [verdict]);
@@ -107,7 +132,8 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
     const place = coords ? await placeName(coords) : null;
     const row = await addSighting({
       species_id: chosen,
-      breed_id: null,
+      // La raza solo cuenta si es de la especie elegida.
+      breed_id: breed && breed.species_id === chosen ? breed.id : null,
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
       accuracy: coords?.accuracy ?? null,
@@ -184,6 +210,17 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
             </View>
           )}
 
+          {chosen ? (
+            <BreedPicker
+              speciesId={chosen}
+              cc={cc}
+              value={breed && breed.species_id === chosen ? breed : null}
+              onChange={setBreed}
+              guesses={guesses.species === chosen ? guesses.top : []}
+              sureRid={guesses.species === chosen ? guesses.sure : null}
+            />
+          ) : null}
+
           {searching ? (
             <View style={{ marginTop: space.lg, gap: space.sm }}>
               <View style={[styles.search, { backgroundColor: palette.surface }]}>
@@ -253,7 +290,7 @@ function Option({ species, p, selected, onPress }: { species: SpeciesRow; p: num
           borderColor: selected ? palette.blaze : 'rgba(255,255,255,0.16)',
         },
       ]}>
-      <Image source={species.img} style={styles.optionImg} contentFit="cover" />
+      <Image source={listThumb(species.img)} style={styles.optionImg} contentFit="cover" />
       <View style={styles.fill}>
         <Txt variant="bodyStrong" tone={selected ? 'ink' : 'onForest'} numberOfLines={1}>
           {species.name_es ?? species.name_en ?? species.sci}

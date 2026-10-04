@@ -1,5 +1,6 @@
 import type { Thresholds } from './decision';
 import { DEFAULT_THRESHOLDS } from './decision';
+import { BUNDLED_BREEDS, BUNDLED_MODEL } from './modelAsset';
 
 /*
  * Qué modelos usa el reconocimiento y de dónde salen.
@@ -21,6 +22,13 @@ import { DEFAULT_THRESHOLDS } from './decision';
 
 export type ModelSource = { kind: 'asset'; module: number } | { kind: 'url'; url: string };
 
+/** Retratos medios de razas (perro, gato) con su umbral calibrado. */
+export type BreedModel = {
+  index: ModelSource;
+  /** Probabilidad desde la que la raza más probable acierta ≥95 %. */
+  threshold: number;
+};
+
 export type SpeciesModel = {
   id: string;
   encoder: ModelSource;
@@ -30,7 +38,11 @@ export type SpeciesModel = {
   inputSize: number;
 };
 
-export const SPECIES_MODEL: SpeciesModel | null = null;
+/** Lo genera `tools/zarpa_models/publish.py` con los umbrales calibrados. */
+export const SPECIES_MODEL: SpeciesModel | null = BUNDLED_MODEL;
+
+/** Lo genera `tools/zarpa_models/publish.py` si hay índice de razas calibrado. */
+export const BREED_MODEL: BreedModel | null = BUNDLED_BREEDS;
 
 export const FALLBACK_THRESHOLDS = DEFAULT_THRESHOLDS;
 

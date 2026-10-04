@@ -14,9 +14,9 @@ import { create } from 'zustand';
 import { catalog } from '@/db';
 import { COUNTRY_MIN_OBS } from '@/db/query';
 
-import { SPECIES_MODEL, type ModelSource } from './config';
+import { BREED_MODEL, SPECIES_MODEL, type ModelSource } from './config';
 import { decide, softmax, type Lineage, type Verdict } from './decision';
-import { l2normalize, parseIndex, scoreCandidates, type SpeciesIndex } from './speciesIndex';
+import { parseIndex, prepareQuery, scoreCandidates, type SpeciesIndex } from './speciesIndex';
 
 /*
  * Motor de reconocimiento: carga los modelos una vez y los comparte con el visor.
@@ -50,6 +50,7 @@ let detector: Detector | null = null;
 let embedder: ImageEmbedder | null = null;
 let index: SpeciesIndex | null = null;
 let lineages: Map<number, Lineage> | null = null;
+let breedIndex: SpeciesIndex | null = null;
 let started = false;
 
 /** El detector, si está listo (lo usa el hilo de la cámara). */
@@ -100,6 +101,15 @@ async function loadSpecies() {
     const buffer = await new File(indexPath).arrayBuffer();
     index = parseIndex(buffer);
     lineages = await loadLineages();
+    if (BREED_MODEL) {
+      // Las razas son un extra: si su índice falla, las especies siguen.
+      try {
+        const breedPath = await resolveSource(BREED_MODEL.index, () => {});
+        breedIndex = parseIndex(await new File(breedPath).arrayBuffer());
+      } catch {
+        breedIndex = null;
+      }
+    }
     useAI.setState({ species: 'ready', speciesProgress: 1 });
   } catch (e) {
     useAI.setState({ species: 'error', error: describe(e) });
@@ -119,7 +129,7 @@ async function resolveSource(source: ModelSource, onProgress: (p: number) => voi
 
 async function loadLineages(): Promise<Map<number, Lineage>> {
   const rows = await catalog().getAllAsync<{ id: number } & Lineage>(
-    'SELECT id, class_sci AS class, order_sci AS "order", family_sci AS family, genus_sci AS genus FROM species',
+    'SELECT id, class_sci AS class, order_sci AS "order", family_sci AS family, genus_sci AS genus FROM species_v',
   );
   return new Map(rows.map((r) => [r.id, { class: r.class, order: r.order, family: r.family, genus: r.genus }]));
 }
@@ -148,9 +158,29 @@ export async function candidatesFor(cc: string | null): Promise<number[] | undef
 /** Del vector de una imagen a un veredicto honesto (ver `decision.ts`). */
 export function judge(embedding: Float32Array, candidates?: number[]): Verdict | null {
   if (!index || !lineages || !SPECIES_MODEL) return null;
-  const scored = scoreCandidates(index, l2normalize(embedding), candidates);
+  const scored = scoreCandidates(index, prepareQuery(index, embedding), candidates);
   const probs = softmax(scored);
   return decide(probs, (id) => lineages!.get(id), SPECIES_MODEL.thresholds);
+}
+
+export type BreedGuess = { rid: number; p: number };
+
+/**
+ * Raza más probable entre las de la especie (perro, gato…), con probabilidad
+ * calibrada. `sure` solo si supera el umbral con el que acierta ≥95 %; si no,
+ * la app la enseña como sugerencia y decide la persona.
+ */
+export async function judgeBreed(
+  embedding: Float32Array,
+  speciesId: number,
+): Promise<{ top: BreedGuess[]; sure: BreedGuess | null } | null> {
+  if (!breedIndex || !BREED_MODEL) return null;
+  const rows = await catalog().getAllAsync<{ rid: number }>('SELECT rid FROM breed WHERE species_id = ?', [speciesId]);
+  const scored = scoreCandidates(breedIndex, prepareQuery(breedIndex, embedding), rows.map((r) => r.rid));
+  if (scored.length < 2) return null;
+  const probs = softmax(scored);
+  const top = probs.slice(0, 3).map((c) => ({ rid: c.id, p: c.p }));
+  return { top, sure: top[0].p >= BREED_MODEL.threshold ? top[0] : null };
 }
 
 export function speciesModelId(): string | null {

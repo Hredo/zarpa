@@ -9,7 +9,8 @@ import { Txt } from '@/components/Txt';
 import { catalog } from '@/db';
 import type { SortKey } from '@/db/query';
 import { COUNTRIES, REGION_LABEL, type Region } from '@/lib/countries';
-import { GROUPS, IUCN_LABEL, MEDIUM, RARITY } from '@/lib/groups';
+import { fmtInt } from '@/lib/format';
+import { DIETS, ENVS, GROUPS, IUCN_LABEL, MEDIUM, RARITY } from '@/lib/groups';
 import { useFilters } from '@/store/filters';
 import { iucnColors, radius, space, type, usePalette } from '@/theme';
 
@@ -20,7 +21,8 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'rarity', label: 'Más raras' },
 ];
 
-type Availability = { medium: boolean; diet: boolean; repro: boolean; domestic: boolean; envs: boolean };
+/** Cuántas especies tienen verificado cada dato: el filtro solo las abarca a ellas. */
+type Availability = { medium: number; diet: number; repro: number; domestic: number; envs: number; envBits: number };
 
 export default function Filtros() {
   const palette = usePalette();
@@ -32,19 +34,17 @@ export default function Filtros() {
 
   // Solo se ofrecen los filtros cuyo dato ya está verificado en el catálogo.
   useEffect(() => {
-    const db = catalog();
-    (async () => {
-      const q = async (sql: string) => ((await db.getFirstAsync<{ x: number }>(sql))?.x ?? 0) > 0;
-      setAvail({
-        medium: await q('SELECT EXISTS(SELECT 1 FROM species WHERE medium != 0) AS x'),
-        diet: await q('SELECT EXISTS(SELECT 1 FROM species WHERE diet IS NOT NULL) AS x'),
-        repro: await q('SELECT EXISTS(SELECT 1 FROM species WHERE repro IS NOT NULL) AS x'),
-        domestic: await q('SELECT EXISTS(SELECT 1 FROM species WHERE domestic = 1) AS x'),
-        envs: await q('SELECT EXISTS(SELECT 1 FROM species WHERE envs != 0) AS x'),
-      });
-      setDiets((await db.getAllAsync<{ v: string }>('SELECT DISTINCT diet AS v FROM species WHERE diet IS NOT NULL ORDER BY v')).map((r) => r.v));
-      setRepros((await db.getAllAsync<{ v: string }>('SELECT DISTINCT repro AS v FROM species WHERE repro IS NOT NULL ORDER BY v')).map((r) => r.v));
-    })().catch(() => {});
+    // build.py deja precalculado cuántas especies tienen cada dato.
+    catalog()
+      .getFirstAsync<{ value: string }>("SELECT value FROM meta WHERE key = 'coverage'")
+      .then((row) => {
+        if (!row) return;
+        const c = JSON.parse(row.value) as Availability & { diets: string[]; repros: string[] };
+        setAvail(c);
+        setDiets(DIETS.map((d) => d.label).filter((d) => c.diets.includes(d)));
+        setRepros([...c.repros].sort());
+      })
+      .catch(() => {});
   }, []);
 
   const toggleIn = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
@@ -76,8 +76,9 @@ export default function Filtros() {
   }, [countryQuery]);
 
   const pending = avail
-    ? [!avail.medium && 'medio', !avail.diet && 'alimentación', !avail.repro && 'reproducción', !avail.envs && 'ambientes (ciudad, bosque, selva…)'].filter(Boolean)
+    ? [!avail.medium && 'medio', !avail.diet && 'alimentación', !avail.repro && 'reproducción', !avail.envs && 'ambientes'].filter(Boolean)
     : [];
+  const missingEnvs = avail ? ENVS.filter((e) => (avail.envBits & e.bit) === 0).map((e) => e.label.toLowerCase()) : [];
 
   return (
     <View style={[styles.fill, { backgroundColor: palette.bg }]}>
@@ -203,7 +204,27 @@ export default function Filtros() {
           </Txt>
         </Block>
 
-        {avail?.medium && (
+        {avail && avail.domestic > 0 && (
+          <Block title="Doméstico o silvestre">
+            <Chip label="Todos" on={filters.domestic === 'any'} onPress={() => set({ domestic: 'any' })} />
+            <Chip label="Domésticos" on={filters.domestic === 'domestic'} onPress={() => set({ domestic: 'domestic' })} />
+            <Chip label="Silvestres" on={filters.domestic === 'wild'} onPress={() => set({ domestic: 'wild' })} />
+            <Coverage text="Doméstico: el perro, la vaca… y también las especies silvestres que tienen forma doméstica (el jabalí y el cerdo), según los catálogos oficiales de razas." />
+          </Block>
+        )}
+        {avail && avail.envs > 0 && (
+          <Block title="Ambiente">
+            {ENVS.filter((e) => (avail.envBits & e.bit) !== 0).map((e) => (
+              <Chip key={e.bit} label={e.label} on={(filters.envs & e.bit) !== 0} onPress={() => set({ envs: filters.envs ^ e.bit })} />
+            ))}
+            <Coverage
+              text={`Con ambiente verificado: ${fmtInt(avail.envs)} especies (hábitat de AVONET para aves y de ReptTraits para reptiles; granja, por los catálogos oficiales de ganado).${
+                missingEnvs.length ? ` Aún sin fuente que lo verifique: ${missingEnvs.join(', ')}.` : ''
+              }`}
+            />
+          </Block>
+        )}
+        {avail && avail.medium > 0 && (
           <Block title="Medio">
             {MEDIUM.map((m) => (
               <Chip
@@ -213,27 +234,23 @@ export default function Filtros() {
                 onPress={() => set({ media: filters.media ^ m.bit })}
               />
             ))}
+            <Coverage text={`Con medio verificado: ${fmtInt(avail.medium)} especies (WoRMS y bases de rasgos).`} />
           </Block>
         )}
-        {avail?.diet && (
+        {avail && avail.diet > 0 && (
           <Block title="Alimentación">
             {diets.map((d) => (
               <Chip key={d} label={d} on={filters.diets.includes(d)} onPress={() => set({ diets: toggleIn(filters.diets, d) })} />
             ))}
+            <Coverage text={`Con dieta verificada: ${fmtInt(avail.diet)} especies de vertebrados terrestres (AVONET, EltonTraits, ReptTraits, AmphiBIO).`} />
           </Block>
         )}
-        {avail?.repro && (
+        {avail && avail.repro > 0 && (
           <Block title="Reproducción">
             {repros.map((d) => (
               <Chip key={d} label={d} on={filters.repro.includes(d)} onPress={() => set({ repro: toggleIn(filters.repro, d) })} />
             ))}
-          </Block>
-        )}
-        {avail?.domestic && (
-          <Block title="Origen">
-            <Chip label="Todas" on={filters.domestic === 'any'} onPress={() => set({ domestic: 'any' })} />
-            <Chip label="Domésticas" on={filters.domestic === 'domestic'} onPress={() => set({ domestic: 'domestic' })} />
-            <Chip label="Silvestres" on={filters.domestic === 'wild'} onPress={() => set({ domestic: 'wild' })} />
+            <Coverage text={`Con reproducción verificada: ${fmtInt(avail.repro)} especies.`} />
           </Block>
         )}
 
@@ -248,6 +265,15 @@ export default function Filtros() {
         )}
       </ScrollView>
     </View>
+  );
+}
+
+/** Qué parte del catálogo abarca un filtro: lo que no está verificado no entra. */
+function Coverage({ text }: { text: string }) {
+  return (
+    <Txt variant="small" tone="faint" style={styles.coverage}>
+      {text}
+    </Txt>
   );
 }
 
@@ -293,4 +319,5 @@ const styles = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 44, paddingHorizontal: space.md, borderRadius: radius.md, borderWidth: 1 },
   input: { flex: 1, paddingVertical: 0 },
   pending: { borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.lg, padding: space.lg, gap: space.xs },
+  coverage: { width: '100%', marginTop: space.xs },
 });
