@@ -3,11 +3,12 @@ Etapa 1 · Universo de especies observables.
 
 Pregunta a iNaturalist qué especies de animales (taxón 1, Animalia) tienen
 observaciones de grado investigación de ejemplares en libertad, ordenadas de más
-a menos observadas, y se detiene al bajar de `MIN_RG_OBSERVATIONS`.
+a menos observadas, y se detiene al bajar de `MIN_RG_OBSERVATIONS` (con 1,
+hasta la última especie: ~600 páginas por idioma).
 
 Se hace dos veces, en español (con los nombres de España) y en inglés, porque
-`species_counts` solo devuelve el nombre común del idioma pedido. Son ~200
-páginas por idioma: unos 7 minutos en total al ritmo que pide iNaturalist.
+`species_counts` solo devuelve el nombre común del idioma pedido. Son ~600
+páginas por idioma: unos 20 minutos en total al ritmo que pide iNaturalist.
 
 Salida: `out/universe.jsonl`, una especie por línea.
 """
@@ -36,7 +37,7 @@ def _pages(locale: str):
             params["captive"] = "false"
         if locale == "es":
             params["preferred_place_id"] = config.INAT_PLACE_SPAIN
-        rec = fetch_json(API, params)
+        rec = fetch_json(API, params, cache_tag=config.UNIVERSE_SNAPSHOT)
         results = rec["data"]["results"]
         if not results:
             return

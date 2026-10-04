@@ -16,11 +16,14 @@ STAGES = [
     "wikidata",
     "gbif",
     "countries",
+    "split",
     "commons",
     "wikipedia",
     "worms",
     "traits",
     "breeds",
+    "urban",
+    "depth",
     "build",
 ]
 

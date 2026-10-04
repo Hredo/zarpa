@@ -26,23 +26,30 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
+import threading
+
 import httpx
 
 from . import config
 
 _last_call: dict[str, float] = {}
 _client: httpx.Client | None = None
+# Con varios hilos (banco de pruebas), cada host tiene su turno: sin cerrojo,
+# dos hilos leerían la misma última llamada y saldrían a la vez.
+_guard = threading.Lock()
+_host_locks: dict[str, threading.Lock] = {}
 
 
 def _get_client() -> httpx.Client:
     global _client
-    if _client is None:
-        _client = httpx.Client(
-            headers={"User-Agent": config.USER_AGENT, "Accept": "application/json"},
-            timeout=httpx.Timeout(60.0, connect=20.0),
-            follow_redirects=True,
-            http2=False,
-        )
+    with _guard:
+        if _client is None:
+            _client = httpx.Client(
+                headers={"User-Agent": config.USER_AGENT, "Accept": "application/json"},
+                timeout=httpx.Timeout(60.0, connect=20.0),
+                follow_redirects=True,
+                http2=False,
+            )
     return _client
 
 
@@ -53,12 +60,15 @@ def _cache_path(key: str):
 
 def _throttle(host: str) -> None:
     interval = config.MIN_INTERVAL.get(host, config.DEFAULT_INTERVAL)
-    last = _last_call.get(host)
-    if last is not None:
-        wait = interval - (time.monotonic() - last)
-        if wait > 0:
-            time.sleep(wait)
-    _last_call[host] = time.monotonic()
+    with _guard:
+        lock = _host_locks.setdefault(host, threading.Lock())
+    with lock:
+        last = _last_call.get(host)
+        if last is not None:
+            wait = interval - (time.monotonic() - last)
+            if wait > 0:
+                time.sleep(wait)
+        _last_call[host] = time.monotonic()
 
 
 class FetchError(RuntimeError):
@@ -75,17 +85,20 @@ def fetch_json(
     use_cache: bool = True,
     max_retries: int = 6,
     allow_404: bool = False,
+    cache_tag: str = "",
 ) -> dict[str, Any]:
     """
     Devuelve `{"url", "retrieved_at", "status", "data"}`.
 
     `data` es el JSON de la respuesta (o `None` si fue 404 y se permitió).
+    `cache_tag` separa en la caché una nueva tirada de la misma URL (p. ej.
+    recuentos que cambian con el tiempo) sin tocar la URL que se pide.
     """
     full_url = url
     if params:
         full_url = f"{url}?{urlencode(params, doseq=True)}"
     body_key = json.dumps(data, sort_keys=True) if data else ""
-    key = f"{method} {full_url} {body_key}"
+    key = f"{method} {full_url} {body_key}" + (f" #{cache_tag}" if cache_tag else "")
     path = _cache_path(key)
 
     if use_cache and path.exists():
@@ -131,6 +144,58 @@ def fetch_json(
         "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "status": resp.status_code,
         "data": payload,
+    }
+    if use_cache:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+            json.dump(record, fh, ensure_ascii=False)
+        tmp.replace(path)
+    return record
+
+
+def fetch_text(url: str, *, encoding: str | None = None, use_cache: bool = True, max_retries: int = 6) -> dict[str, Any]:
+    """
+    Como `fetch_json`, pero para páginas HTML (catálogos oficiales de razas).
+
+    Devuelve `{"url", "retrieved_at", "status", "text"}`; `text` es `None` si la
+    página no existe (404). `encoding` fuerza la codificación cuando el servidor
+    la declara mal (la FCI sirve ISO-8859-1).
+    """
+    path = _cache_path(f"TEXT {url}")
+    if use_cache and path.exists():
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return json.load(fh)
+    host = urlsplit(url).netloc
+    attempt = 0
+    while True:
+        _throttle(host)
+        try:
+            resp = _get_client().get(url, headers={"Accept": "text/html,*/*"})
+        except httpx.HTTPError as exc:
+            attempt += 1
+            if attempt > max_retries:
+                raise FetchError(f"{url}: {exc}") from exc
+            time.sleep(min(120, 2**attempt + random.random()))
+            continue
+        if resp.status_code in (429, 500, 502, 503, 504):
+            attempt += 1
+            if attempt > max_retries:
+                raise FetchError(f"{url}: HTTP {resp.status_code}")
+            time.sleep(min(300, 2**attempt + random.random()))
+            continue
+        if resp.status_code == 404:
+            text = None
+        elif resp.status_code >= 400:
+            raise FetchError(f"{url}: HTTP {resp.status_code}")
+        else:
+            text = resp.content.decode(encoding) if encoding else resp.text
+        break
+    record = {
+        "url": url,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "status": resp.status_code,
+        "text": text,
     }
     if use_cache:
         path.parent.mkdir(parents=True, exist_ok=True)

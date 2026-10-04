@@ -54,7 +54,7 @@ def main() -> None:
         "",
     ]
     out = config.ROOT.parent / "app" / "src" / "lib" / "countries.ts"
-    out.write_text("\n".join(lines), encoding="utf-8")
+    out.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     print(f"{len(rows)} países -> {out}")
 
 

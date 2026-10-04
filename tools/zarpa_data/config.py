@@ -22,17 +22,26 @@ USER_AGENT = "ZarpaDataBot/0.1 (+https://github.com/Hredo; catalogo de fauna)"
 
 # --- Qué especies entran -----------------------------------------------------
 
-# Una especie entra si personas la han fotografiado en libertad y la comunidad
-# ha confirmado la identificación (grado «investigación» de iNaturalist) al
-# menos este número de veces.
+# Una especie entra si al menos una persona la ha fotografiado en libertad y la
+# comunidad ha confirmado la identificación (grado «investigación» de
+# iNaturalist: dos o más identificadores y al menos dos tercios de acuerdo).
 #
 # Es la prueba de la regla del producto «solo animales que un humano puede ver
-# sin ayuda»: lo que solo se conoce por ROV, dragas de profundidad, trampas de
-# cuevas inaccesibles o drones no acumula fotos de personas. 25 deja fuera el
-# ruido (especies con dos o tres fotos, a menudo mal asignadas) y conserva
-# ~100 000 especies en todo el mundo (medido el 2026-10-04: el puesto 100 000
-# tiene 23 observaciones de grado investigación).
-MIN_RG_OBSERVATIONS = 25
+# sin ayuda», a escala mundial: lo que solo se conoce por ejemplares de museo,
+# dragas, trampas de cuevas inaccesibles o drones no tiene fotos de personas en
+# libertad. El nombre además tiene que existir en la taxonomía de GBIF (etapa
+# gbif) y, si es marino, no estar registrado solo en aguas profundas (etapa
+# depth): verlo exigiría un submarino.
+#
+# Hasta el 2026-10-04 el corte era 25 observaciones (~97 000 especies). Hugo
+# quiere todas las especies del mundo: con 1 son ~297 000. La rareza de cada
+# especie sigue diciendo lo difícil que es verla.
+MIN_RG_OBSERVATIONS = 1
+
+# Etiqueta de la tirada del universo: los recuentos cambian cada día y una
+# página vieja en caché mezclada con páginas nuevas podría saltarse especies
+# en el borde entre páginas. Se cambia al rehacer el universo.
+UNIVERSE_SNAPSHOT = "2026-10-04-mundo"
 
 # Solo observaciones de animales en libertad. Sin esto, un pingüino del zoo de
 # Madrid contaría como prueba de que se puede ver en España.
@@ -57,5 +66,11 @@ MIN_INTERVAL = {
     "es.wikipedia.org": 0.2,
     "en.wikipedia.org": 0.2,
     "www.marinespecies.org": 0.3,
+    # Fotos de iNaturalist (cubo público de AWS Open Data): ficheros estáticos.
+    "inaturalist-open-data.s3.amazonaws.com": 0.1,
+    # Webs institucionales sin API: una página por segundo.
+    "www.fci.be": 1.0,
+    "fifeweb.org": 1.0,
+    "www.mapa.gob.es": 1.0,
 }
 DEFAULT_INTERVAL = 0.5

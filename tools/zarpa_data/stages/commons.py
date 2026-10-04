@@ -72,34 +72,48 @@ def run() -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         for i in range(0, len(files), BATCH):
             chunk = files[i : i + BATCH]
-            titles = "|".join("File:" + _unquote(f) for f in chunk)
-            rec = fetch_json(
-                API,
+            for entry in describe(chunk):
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                ok += 1
+            if (i // BATCH) % 40 == 0:
+                print(f"[commons] {i + len(chunk)}/{len(files)}", flush=True)
+    print(f"[commons] {ok} imágenes con metadatos: {out_path}")
+
+
+def describe(files: list[str]) -> list[dict]:
+    """Metadatos (miniatura, autor, licencia) de hasta 50 ficheros de Commons."""
+    out = []
+    for i in range(0, len(files), BATCH):
+        chunk = files[i : i + BATCH]
+        titles = "|".join("File:" + _unquote(f) for f in chunk)
+        rec = fetch_json(
+            API,
+            {
+                "action": "query",
+                "titles": titles,
+                "prop": "imageinfo",
+                "iiprop": "url|size|mime|extmetadata",
+                "iiurlwidth": THUMB,
+                "iiextmetadatafilter": "Artist|LicenseShortName|License|LicenseUrl|AttributionRequired|Credit",
+                "format": "json",
+                "formatversion": 2,
+                "maxlag": 5,
+            },
+        )
+        pages = rec["data"].get("query", {}).get("pages", [])
+        for p in pages:
+            info = (p.get("imageinfo") or [None])[0]
+            if not info:
+                continue
+            meta = info.get("extmetadata") or {}
+            mime = info.get("mime") or ""
+            if not (mime.startswith("image/jpeg") or mime.startswith("image/png") or mime.startswith("image/webp") or mime.startswith("image/tiff")):
+                continue
+            short = (meta.get("LicenseShortName") or {}).get("value")
+            code = (meta.get("License") or {}).get("value")
+            width, height = info.get("width"), info.get("height")
+            out.append(
                 {
-                    "action": "query",
-                    "titles": titles,
-                    "prop": "imageinfo",
-                    "iiprop": "url|size|mime|extmetadata",
-                    "iiurlwidth": THUMB,
-                    "iiextmetadatafilter": "Artist|LicenseShortName|License|LicenseUrl|AttributionRequired|Credit",
-                    "format": "json",
-                    "formatversion": 2,
-                    "maxlag": 5,
-                },
-            )
-            pages = rec["data"].get("query", {}).get("pages", [])
-            for p in pages:
-                info = (p.get("imageinfo") or [None])[0]
-                if not info:
-                    continue
-                meta = info.get("extmetadata") or {}
-                mime = info.get("mime") or ""
-                if not (mime.startswith("image/jpeg") or mime.startswith("image/png") or mime.startswith("image/webp") or mime.startswith("image/tiff")):
-                    continue
-                short = (meta.get("LicenseShortName") or {}).get("value")
-                code = (meta.get("License") or {}).get("value")
-                width, height = info.get("width"), info.get("height")
-                entry = {
                     "file": p["title"].split(":", 1)[1].replace(" ", "_"),
                     "thumb": info.get("thumburl") or info.get("url"),
                     "ratio": (width / height) if width and height else None,
@@ -110,11 +124,8 @@ def run() -> None:
                     "page": info.get("descriptionurl"),
                     "retrieved_at": rec["retrieved_at"],
                 }
-                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                ok += 1
-            if (i // BATCH) % 40 == 0:
-                print(f"[commons] {i + len(chunk)}/{len(files)}", flush=True)
-    print(f"[commons] {ok} imágenes con metadatos: {out_path}")
+            )
+    return out
 
 
 def _unquote(name: str) -> str:
