@@ -174,6 +174,15 @@ export default function Fuentes() {
             cada una muestra su autor y licencia. Los resúmenes son de Wikipedia (CC BY-SA 4.0) y enlazan a su artículo.
           </Txt>
         </Section>
+
+        <Section title="Sonidos, clima y rarezas" icon="sun" accent={palette.leaf} tint={palette.leafTint}>
+          <Txt variant="body">
+            Los sonidos son grabaciones de observaciones confirmadas de iNaturalist, solo con licencias que permiten cualquier uso
+            (CC0, CC BY, CC BY-SA y CC BY-ND), con su autor. El clima de cada avistamiento es de Open-Meteo.com (CC BY 4.0). Las
+            rarezas cerca de ti salen de observaciones confirmadas de iNaturalist de las dos últimas semanas; nunca se muestra
+            dónde se vieron.
+          </Txt>
+        </Section>
       </ScrollView>
     </View>
   );

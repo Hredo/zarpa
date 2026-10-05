@@ -40,15 +40,20 @@ export type RawObservation = {
 /** Grupos en los que tiene sentido buscar sonidos (evita peticiones inútiles). */
 export const SOUND_GROUPS = new Set(['ave', 'anfibio', 'insecto', 'mamifero', 'reptil', 'pez']);
 
+/**
+ * Licencias aceptadas: las que permiten cualquier uso, también comercial (como
+ * las fotos del catálogo: nada NC, para no atar la app a un uso no comercial).
+ * ND vale porque el sonido se reproduce tal cual, sin modificarlo.
+ */
 const LICENSES: Record<string, { label: string; url: string }> = {
   cc0: { label: 'CC0', url: 'https://creativecommons.org/publicdomain/zero/1.0/' },
   'cc-by': { label: 'CC BY', url: 'https://creativecommons.org/licenses/by/4.0/' },
   'cc-by-sa': { label: 'CC BY-SA', url: 'https://creativecommons.org/licenses/by-sa/4.0/' },
-  'cc-by-nc': { label: 'CC BY-NC', url: 'https://creativecommons.org/licenses/by-nc/4.0/' },
   'cc-by-nd': { label: 'CC BY-ND', url: 'https://creativecommons.org/licenses/by-nd/4.0/' },
-  'cc-by-nc-sa': { label: 'CC BY-NC-SA', url: 'https://creativecommons.org/licenses/by-nc-sa/4.0/' },
-  'cc-by-nc-nd': { label: 'CC BY-NC-ND', url: 'https://creativecommons.org/licenses/by-nc-nd/4.0/' },
 };
+
+/** Para la consulta a iNaturalist (`sound_license`). */
+export const SOUND_LICENSES = Object.keys(LICENSES).join(',');
 
 /** Formatos que reproducen iOS y Android (nada de ogg/opus/flac). */
 const PLAYABLE_EXT = ['mp3', 'm4a', 'mp4', 'aac', 'wav'];
@@ -79,7 +84,7 @@ export function placeLabel(guess: string | null | undefined): string | null {
   return g;
 }
 
-/** Filtra y ordena: solo CC, formatos reproducibles, un sonido por autor, ligeros primero. */
+/** Filtra y ordena: solo licencias libres sin NC, formatos reproducibles, un sonido por autor, ligeros primero. */
 export function parseSounds(results: RawObservation[], limit = 3): Sound[] {
   const seen = new Set<string>();
   const out: (Sound & { heavy: boolean })[] = [];

@@ -145,17 +145,18 @@ describe('sonidos de iNaturalist', () => {
     ],
   });
 
-  it('solo licencias CC, formatos reproducibles, un sonido por autor y WAV al final', () => {
+  it('solo licencias libres sin NC, formatos reproducibles, un sonido por autor y WAV al final', () => {
     const list = parseSounds([
       obs(1, 'ana', 'wav', 'cc-by'),
       obs(2, 'ana', 'm4a', 'cc-by'),
       obs(3, 'beto', 'mp3', null),
       obs(4, 'carla', 'ogg', 'cc-by'),
       obs(5, 'dani', 'mp3', 'cc-by-nc'),
+      obs(6, 'eva', 'mp3', 'cc-by-nd'),
     ]);
-    expect(list.map((s) => s.author)).toEqual(['ana', 'dani']);
+    expect(list.map((s) => s.author)).toEqual(['ana', 'eva']);
     expect(list[0].url).toContain('/2.m4a');
-    expect(list[1].licenseLabel).toBe('CC BY-NC');
+    expect(list[1].licenseLabel).toBe('CC BY-ND');
     expect(list[0].obsUrl).toBe('https://www.inaturalist.org/observations/2');
   });
 
