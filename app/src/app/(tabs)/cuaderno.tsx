@@ -17,7 +17,7 @@ import { StatTile } from '@/components/StatTile';
 import { TrailMark } from '@/components/TrailMark';
 import { Txt } from '@/components/Txt';
 import { getSpeciesByIds, groupTotals, type SpeciesRow } from '@/db/catalog';
-import { CATALOG_SPECIES } from '@/db/catalogAsset';
+import { catalogInfo } from '@/db';
 import { fmtDate, fmtInt } from '@/lib/format';
 import { GROUP_BY_CODE, GROUPS, type GroupCode } from '@/lib/groups';
 import { displayName } from '@/lib/speciesName';
@@ -112,10 +112,10 @@ export default function Cuaderno() {
               <View style={styles.heroTop}>
                 <AnimatedNumber value={caught.size} variant="hero" />
                 <Txt variant="body" tone="soft" style={styles.heroOf}>
-                  {caught.size === 1 ? 'especie' : 'especies'} de {fmtInt(CATALOG_SPECIES)}
+                  {caught.size === 1 ? 'especie' : 'especies'} de {fmtInt(catalogInfo().species)}
                 </Txt>
               </View>
-              <Meter value={Math.max(caught.size / CATALOG_SPECIES, 0.015)} color={palette.brand} height={12} style={styles.heroMeter} />
+              <Meter value={Math.max(caught.size / catalogInfo().species, 0.015)} color={palette.brand} height={12} style={styles.heroMeter} />
             </Card>
           </Appear>
           <View style={styles.tiles}>

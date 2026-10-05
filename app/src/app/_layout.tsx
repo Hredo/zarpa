@@ -11,6 +11,7 @@ import { AccountSwitchSheet } from '@/components/AccountSwitchSheet';
 import { BootError } from '@/components/BootError';
 import { WelcomeGate } from '@/components/WelcomeGate';
 import { openDatabases } from '@/db';
+import { checkCatalogUpdate } from '@/db/catalogUpdate';
 import { startAuth } from '@/store/auth';
 import { useJournal } from '@/store/journal';
 import { startSync } from '@/sync';
@@ -34,6 +35,8 @@ export default function RootLayout() {
         // La cuenta y la copia en la nube son opcionales: arrancan sin bloquear la app.
         startAuth();
         startSync();
+        // El catálogo nuevo (si lo hay) se busca con la app ya en marcha, sin competir con el arranque.
+        setTimeout(() => void checkCatalogUpdate(), 8000);
       })
       .then(() => setDbReady(true))
       .catch((e: unknown) => setDbError(e instanceof Error ? e : new Error(String(e))));

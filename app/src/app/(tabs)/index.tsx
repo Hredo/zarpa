@@ -25,7 +25,7 @@ import { StatTile } from '@/components/StatTile';
 import { TrailMark } from '@/components/TrailMark';
 import { Txt } from '@/components/Txt';
 import { getSpeciesByIds, groupTotals, type SpeciesRow } from '@/db/catalog';
-import { CATALOG_SPECIES } from '@/db/catalogAsset';
+import { catalogInfo } from '@/db';
 import { fmtAgo, fmtInt } from '@/lib/format';
 import { GROUPS, rarityInfo, type GroupCode } from '@/lib/groups';
 import { useLastLocation, type Coords } from '@/lib/location';
@@ -154,7 +154,7 @@ export default function Inicio() {
   const photoH = Math.min(Math.round(photoW * 0.72), 360);
   const todayG = today ? groupColor(today.grp) : null;
   const todayName = today ? displayName(today) : null;
-  const progress = caught.size / CATALOG_SPECIES;
+  const progress = caught.size / catalogInfo().species;
 
   return (
     <ScrollView
@@ -317,7 +317,7 @@ export default function Inicio() {
             <View style={styles.progressTop}>
               <AnimatedNumber value={caught.size} variant="hero" />
               <Txt variant="body" tone="soft" style={styles.progressOf}>
-                de {fmtInt(CATALOG_SPECIES)} especies
+                de {fmtInt(catalogInfo().species)} especies
               </Txt>
             </View>
             <Meter value={Math.max(progress, caught.size > 0 ? 0.015 : 0)} color={palette.brand} height={12} style={styles.mt} />

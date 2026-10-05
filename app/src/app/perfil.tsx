@@ -13,7 +13,10 @@ import { Press } from '@/components/Press';
 import { Section } from '@/components/Section';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
-import { journal } from '@/db';
+import { Meter } from '@/components/Meter';
+import { catalogInfo, journal } from '@/db';
+import { fmtMegabytes } from '@/db/catalogCloud';
+import { catalogUpdatesEnabled, checkCatalogUpdate, useCatalogUpdate } from '@/db/catalogUpdate';
 import { getSpeciesByIds } from '@/db/catalog';
 import { fmtAgo, fmtDate, fmtInt } from '@/lib/format';
 import { useAuth } from '@/store/auth';
@@ -30,6 +33,61 @@ const SYNC_TEXT: Record<SyncPhase, string> = {
   error: 'Hubo un problema: se reintentará sola',
   blocked: 'En pausa: este móvil tiene el cuaderno de otra cuenta',
 };
+
+const CATALOG_TEXT = {
+  idle: '',
+  checking: 'Buscando actualizaciones…',
+  uptodate: 'Tienes la versión más reciente',
+  available: 'Hay una versión nueva',
+  downloading: 'Descargando la versión nueva…',
+  verifying: 'Comprobando la descarga…',
+  ready: 'Lista: se usará la próxima vez que abras Zarpa',
+  offline: 'Sin conexión: se buscará más tarde',
+  error: 'No se pudo actualizar',
+} as const;
+
+function CatalogSection() {
+  const palette = usePalette();
+  const info = catalogInfo();
+  const { phase, progress, remote, error } = useCatalogUpdate();
+  const busy = phase === 'checking' || phase === 'downloading' || phase === 'verifying';
+  const action = phase === 'available' && remote ? `Descargar (${fmtMegabytes(remote.files.gz.size)})` : 'Buscar actualización';
+  return (
+    <Section title="Catálogo de especies" icon="bestiario" accent={palette.leaf} tint={palette.leafTint}>
+      <Card tone="outline">
+        <Txt variant="bodyStrong">{fmtInt(info.species)} especies de todo el mundo</Txt>
+        <Txt variant="small" tone="soft">
+          {`Datos del ${fmtDate(info.built_at)} · ${info.source === 'nube' ? 'actualizado desde la nube' : 'incluido en la app'}`}
+        </Txt>
+        {catalogUpdatesEnabled ? (
+          <>
+            {phase !== 'idle' ? (
+              <Txt variant="small" tone={phase === 'error' ? 'danger' : phase === 'ready' ? 'brand' : 'soft'} style={styles.gap} accessibilityLiveRegion="polite">
+                {phase === 'error' && error ? error : CATALOG_TEXT[phase]}
+              </Txt>
+            ) : null}
+            {phase === 'downloading' ? <Meter value={progress} color={palette.leaf} height={8} style={styles.gap} /> : null}
+            {phase !== 'ready' ? (
+              <Press
+                disabled={busy}
+                onPress={() => void checkCatalogUpdate({ force: true })}
+                accessibilityRole="button"
+                accessibilityLabel={action}
+                style={[styles.pill, styles.gapLg, { backgroundColor: palette.strongTint }]}>
+                <Txt variant="bodyStrong">{action}</Txt>
+              </Press>
+            ) : null}
+            {phase === 'available' ? (
+              <Txt variant="small" tone="faint" style={styles.gap}>
+                Sin wifi no se descarga sola para no gastar tus datos.
+              </Txt>
+            ) : null}
+          </>
+        ) : null}
+      </Card>
+    </Section>
+  );
+}
 
 function useNotebookStats() {
   const caught = useJournal((s) => s.caught);
@@ -246,6 +304,8 @@ export default function Perfil() {
             </Card>
           </Section>
         ) : null}
+
+        <CatalogSection />
 
         <Section title="Ajustes" icon="info" accent={palette.inkSoft} tint={palette.surfaceAlt}>
           <Card tone="outline" padding={0}>

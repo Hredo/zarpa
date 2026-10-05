@@ -11,17 +11,20 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
 | `firebase.json`, `.firebaserc` | Configuración de la CLI (proyecto por defecto y emuladores) |
 | `firestore.rules`, `firestore.indexes.json`, `storage.rules` | Reglas estrictas: cada usuario solo lee y escribe lo suyo |
 | `functions/` | `onUserCreate`, `onSightingWrite`, `deleteAccount` (Node 22, TypeScript, pnpm) |
-| `functions/test/rules.test.ts` | 18 pruebas de las reglas contra los emuladores |
+| `functions/test/rules.test.ts` | 21 pruebas de las reglas contra los emuladores |
 | `app/src/lib/firebase.ts` | Único punto de `initializeApp` |
 | `app/src/lib/auth.ts`, `app/src/store/auth.ts` | Google, Apple, cierre de sesión, borrado de cuenta |
 | `app/src/sync/` | Sincronización del cuaderno (tablas propias `sync_item` y `sync_meta`) |
+| `app/src/db/catalogUpdate.ts` | Actualización del catálogo de especies desde Storage |
+| `tools/zarpa_data/stages/cloud.py` | Publica el catálogo en Storage (`catalog/`) |
 
 ### Modelo de datos
 
 - `users/{uid}`: alias, photoURL, createdAt, updatedAt, `counters.sightings`. Lo crea la función; el cliente solo cambia alias y foto.
 - `users/{uid}/private/settings`: ajustes privados.
-- `users/{uid}/sightings/{id}`: copia de cada avistamiento (mismas columnas que la tabla local, sin rutas de ficheros; más `has_photo`, `schema`, `synced_at`).
-- Storage: `users/{uid}/sightings/{id}.jpg` (solo JPEG, máx. 10 MB).
+- `users/{uid}/sightings/{id}`: copia de cada avistamiento (mismas columnas que la tabla local, sin rutas de ficheros; más `has_photo`, `has_sticker`, `sticker_ext`, `has_voice`, `voice_ext`, `schema`, `synced_at`). Las reglas validan también el diario (clima, momento del día, duración de la nota de voz).
+- Storage, por avistamiento: `users/{uid}/sightings/{id}.jpg` (foto, JPEG ≤ 10 MB), `{id}.sticker.png|jpg` (pegatina ≤ 10 MB) y `{id}.voice.m4a` (nota de voz, audio ≤ 5 MB; también aac, mp4, caf, 3gp).
+- Storage, `catalog/`: el catálogo de especies versionado y su `manifest.json`. Lectura pública; nadie lo escribe desde la app.
 - Lo social (`publicProfiles`, `follows`) está preparado pero cerrado con `if false`.
 
 ## Pasos que haces tú en la consola
@@ -46,6 +49,24 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
    ```
    Los cambios nativos (plugins, entitlements) requieren un nuevo build de desarrollo: `pnpm exec expo run:android|ios`.
 
+## Publicar el catálogo en Storage
+
+La app trae su catálogo dentro y funciona sin red. Para que reciba datos nuevos (más fotos, nombres…) sin sacar otra versión, se publica en Storage; la app mira una vez al día, con wifi, y usa el nuevo al reabrirse.
+
+```
+gcloud auth application-default login     # una vez por equipo, con tu cuenta de Google del proyecto
+cd tools
+uv run python -m zarpa_data build cloud   # construye y publica; ZARPA_CLOUD_DRY=1 para probar sin subir
+```
+
+Sube `catalog/v/<versión>/catalogo.db.gz` (servido con `Content-Encoding: gzip`), `catalogo.db` sin comprimir de respaldo y, al final, `catalog/manifest.json`. Conserva las 3 últimas versiones. La app solo acepta catálogos de su mismo esquema (`CATALOG_SCHEMA` en `build.py`): si cambian tablas o columnas que la app consulta, sube el número y saca versión nueva de la app.
+
+Coste: cada actualización son ~70 MB por móvil que la baja (salida de Storage). Con muchos usuarios conviene publicar con moderación (p. ej. una vez al mes).
+
+## Cambio de cuenta en el mismo móvil
+
+El cuaderno del móvil tiene dueño (la cuenta que lo sincronizó). Si entra otra cuenta, la sincronización se pausa y la app pregunta: pasar los avistamientos a la cuenta nueva, empezar con el cuaderno de la cuenta nueva (se quitan del móvil; avisa si alguno no estaba en la nube) o cancelar y cerrar sesión. Al cerrar sesión se elige si el cuaderno se queda en el móvil o se borra (solo del móvil; si hay algo sin copiar, avisa antes).
+
 ## Probar en local
 
 ```
@@ -56,6 +77,6 @@ Para que la app use los emuladores: `EXPO_PUBLIC_FIREBASE_EMULATORS=1` y `pnpm d
 
 ## Notas
 
-- Las pegatinas (`sticker`) no se suben: en un móvil nuevo los avistamientos bajan con foto y sin pegatina.
+- Fotos, pegatinas y notas de voz se suben y se bajan con cada avistamiento. Si el mismo avistamiento se edita en dos móviles, gana la edición más reciente (`updated_at`).
 - Borrar la cuenta llama a `deleteAccount`, que elimina Firestore, Storage y Auth. Es obligatorio en App Store y Google Play.
 - La política de privacidad debe mencionar cuenta, fotos y ubicación almacenadas en Firebase (UE).

@@ -11,7 +11,7 @@ import { Icon } from '@/components/Icon';
 import { Press } from '@/components/Press';
 import { Txt } from '@/components/Txt';
 import { groupTotals, searchBreeds, type BreedRow, type SpeciesRow } from '@/db/catalog';
-import { CATALOG_SPECIES } from '@/db/catalogAsset';
+import { catalogInfo } from '@/db';
 import { activeFilterCount, EMPTY_FILTERS, type SortKey } from '@/db/query';
 import { fmtInt } from '@/lib/format';
 import { GROUPS, type GroupCode } from '@/lib/groups';
@@ -86,7 +86,7 @@ export default function Bestiario() {
         <View style={styles.flex}>
           <Txt variant="title">Bestiario</Txt>
           <Txt variant="body" tone="soft">
-            {fmtInt(CATALOG_SPECIES)} animales de todo el mundo
+            {fmtInt(catalogInfo().species)} animales de todo el mundo
           </Txt>
         </View>
         <View style={[styles.tally, { backgroundColor: palette.brandTint }]}>
@@ -152,7 +152,7 @@ export default function Bestiario() {
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.albums, { paddingHorizontal: GUTTER }]}>
-        <Chip label="Todos" count={fmtInt(CATALOG_SPECIES)} selected={selected === null} onPress={() => selectGroup(null)} />
+        <Chip label="Todos" count={fmtInt(catalogInfo().species)} selected={selected === null} onPress={() => selectGroup(null)} />
         {GROUPS.filter((g) => (totals[g.code] ?? 0) > 0).map((g) => (
           <Chip
             key={g.code}
