@@ -10,8 +10,8 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
 |---|---|
 | `firebase.json`, `.firebaserc` | Configuración de la CLI (proyecto por defecto y emuladores) |
 | `firestore.rules`, `firestore.indexes.json`, `storage.rules` | Reglas estrictas: cada usuario solo lee y escribe lo suyo |
-| `functions/` | `onUserCreate`, `onSightingWrite`, `deleteAccount` (Node 22, TypeScript, pnpm) |
-| `functions/test/rules.test.ts` | 21 pruebas de las reglas contra los emuladores |
+| `functions/` | `onUserCreate`, `onSightingWrite`, `deleteAccount` y lo social (`functions/src/social.ts`) (Node 22, TypeScript, pnpm) |
+| `functions/test/` | Pruebas de las reglas y de las funciones de amigos contra los emuladores |
 | `app/src/lib/firebase.ts` | Único punto de `initializeApp` |
 | `app/src/lib/auth.ts`, `app/src/store/auth.ts` | Google, Apple, cierre de sesión, borrado de cuenta |
 | `app/src/sync/` | Sincronización del cuaderno (tablas propias `sync_item` y `sync_meta`) |
@@ -25,7 +25,7 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
 - `users/{uid}/sightings/{id}`: copia de cada avistamiento (mismas columnas que la tabla local, sin rutas de ficheros; más `has_photo`, `has_sticker`, `sticker_ext`, `has_voice`, `voice_ext`, `schema`, `synced_at`). Las reglas validan también el diario (clima, momento del día, duración de la nota de voz).
 - Storage, por avistamiento: `users/{uid}/sightings/{id}.jpg` (foto, JPEG ≤ 10 MB), `{id}.sticker.png|jpg` (pegatina ≤ 10 MB) y `{id}.voice.m4a` (nota de voz, audio ≤ 5 MB; también aac, mp4, caf, 3gp).
 - Storage, `catalog/`: el catálogo de especies versionado y su `manifest.json`. Lectura pública; nadie lo escribe desde la app.
-- Lo social (`publicProfiles`, `follows`) está preparado pero cerrado con `if false`.
+- Lo social (amigos por código, álbum compartido, perfiles públicos): ver `docs/social.md`.
 
 ## Pasos que haces tú en la consola
 
@@ -47,6 +47,7 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
    pnpm --dir functions install
    pnpm dlx firebase-tools deploy --only firestore,storage,functions
    ```
+   La regla de Storage que deja ver pegatinas a los amigos consulta Firestore: la CLI pedirá permiso para conectar Storage con Firestore. Acéptalo.
    Los cambios nativos (plugins, entitlements) requieren un nuevo build de desarrollo: `pnpm exec expo run:android|ios`.
 
 ## Publicar el catálogo en Storage

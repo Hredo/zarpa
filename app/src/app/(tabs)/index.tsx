@@ -29,12 +29,15 @@ import { catalogInfo } from '@/db';
 import { fmtAgo, fmtInt } from '@/lib/format';
 import { GROUPS, rarityInfo, type GroupCode } from '@/lib/groups';
 import { useLastLocation, type Coords } from '@/lib/location';
+import { nearbyRarities, RARITY_DAYS, RARITY_RADIUS_KM, type RareFind } from '@/lib/rarities';
+import { rememberArea } from '@/lib/rarityAlerts';
 import { nearbySpecies } from '@/lib/remote';
 import { displayName } from '@/lib/speciesName';
 import { useSpeciesOfTheDay } from '@/lib/speciesOfDay';
 import { expandUrl } from '@/lib/urls';
 import { useFilters } from '@/store/filters';
 import { listSightings, useJournal, type Sighting } from '@/store/journal';
+import { useSettings } from '@/store/settings';
 import { elevation, groupColor, HIT, radius, space, usePalette } from '@/theme';
 
 const GUTTER = space.lg;
@@ -72,6 +75,8 @@ export default function Inicio() {
   const lastSightingAt = useJournal((s) => s.lastSightingAt);
   const setFilters = useFilters((s) => s.set);
   const today = useSpeciesOfTheDay();
+  const rarityAlerts = useSettings((s) => s.rarityAlerts);
+  const [rare, setRare] = useState<{ key: string; rows: RareFind[] }>({ key: '', rows: [] });
 
   useEffect(() => {
     if (last) return;
@@ -105,6 +110,21 @@ export default function Inicio() {
     // Las coordenadas entran por `coordsKey`: moverse unos metros no repite la consulta.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coordsKey]);
+
+  // Rarezas confirmadas cerca estas dos semanas (y la zona para los avisos, si están activados).
+  useEffect(() => {
+    if (!coords) return;
+    if (rarityAlerts) void rememberArea(coords.lat, coords.lng);
+    let alive = true;
+    nearbyRarities(coords.lat, coords.lng, useJournal.getState().caught).then((res) => {
+      if (alive) setRare({ key: coordsKey, rows: res?.data ?? [] });
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coordsKey, rarityAlerts]);
+  const rarities = rare.key === coordsKey ? rare.rows.filter((r) => !caught.has(r.id)) : [];
 
   const nearby = found.key === coordsKey ? found.rows : null;
   const nearbyState: 'idle' | 'loading' | 'offline' | 'noperm' = !coords
@@ -310,6 +330,31 @@ export default function Inicio() {
           </View>
         ) : null}
       </Appear>
+
+      {rarities.length > 0 ? (
+        <Appear index={5}>
+          <Section title="Rarezas cerca de ti" icon="star" accent={palette.red} tint={palette.redTint}>
+            <Txt variant="body" tone="soft">
+              {`${rarities.length === 1 ? 'Una especie rara confirmada' : `${fmtInt(rarities.length)} especies raras confirmadas`} a menos de ${RARITY_RADIUS_KM} km en los últimos ${RARITY_DAYS} días. ¿Sales a buscarlas?`}
+            </Txt>
+          </Section>
+          <View style={styles.bleed}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
+              {rarities.slice(0, 12).map((s) => (
+                <View key={s.id}>
+                  <Cromo species={s} caught={false} width={152} onPress={open} />
+                  <Txt variant="small" tone="soft" style={styles.localCount}>
+                    {fmtInt(s.seen)} {s.seen === 1 ? 'vez' : 'veces'} estos días
+                  </Txt>
+                </View>
+              ))}
+            </ScrollView>
+            <Txt variant="small" tone="faint" style={styles.credit}>
+              Observaciones confirmadas de iNaturalist · no se muestra dónde para proteger a las especies
+            </Txt>
+          </View>
+        </Appear>
+      ) : null}
 
       <Appear index={5}>
         <Section title="Tu progreso" icon="star" accent={palette.brandInk} tint={palette.sunTint}>

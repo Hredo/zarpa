@@ -19,8 +19,11 @@ import { fmtMegabytes } from '@/db/catalogCloud';
 import { catalogUpdatesEnabled, checkCatalogUpdate, useCatalogUpdate } from '@/db/catalogUpdate';
 import { getSpeciesByIds } from '@/db/catalog';
 import { fmtAgo, fmtDate, fmtInt } from '@/lib/format';
+import { disableRarityAlerts, enableRarityAlerts } from '@/lib/rarityAlerts';
+import { connectInat, disconnectInat, inatEnabled, InatCancelled, InatError, loadInat, useInat } from '@/lib/inat';
 import { useAuth } from '@/store/auth';
 import { useJournal } from '@/store/journal';
+import { useSocial } from '@/social';
 import { useSettings } from '@/store/settings';
 import { signOutWith, syncNow, useSync, type SyncPhase } from '@/sync';
 import { HIT, radius, space, usePalette } from '@/theme';
@@ -86,6 +89,156 @@ function CatalogSection() {
         ) : null}
       </Card>
     </Section>
+  );
+}
+
+function SocialSection() {
+  const palette = usePalette();
+  const profile = useAuth((s) => s.profile);
+  const busy = useAuth((s) => s.busy);
+  const setShareAlbum = useAuth((s) => s.setShareAlbum);
+  const friends = useSocial((s) => s.friends.length);
+  const requests = useSocial((s) => s.requests.length);
+  const albumError = useSocial((s) => s.albumError);
+  return (
+    <Section title="Amigos" icon="heart" accent={palette.red} tint={palette.redTint}>
+      <Card tone="outline" padding={0}>
+        <Press onPress={() => router.push('/amigos')} accessibilityRole="link" accessibilityLabel={`Amigos: ${friends}. Solicitudes: ${requests}`} style={styles.row}>
+          <Icon name="eye" size={20} color={palette.inkSoft} />
+          <View style={styles.fill}>
+            <Txt variant="bodyStrong">{friends > 0 ? `${fmtInt(friends)} ${friends === 1 ? 'amigo' : 'amigos'}` : 'Añadir amigos'}</Txt>
+            <Txt variant="small" tone="soft">
+              Con tu código de amigo, sin buscadores
+            </Txt>
+          </View>
+          {requests > 0 ? (
+            <View style={[styles.badge, { backgroundColor: palette.brand }]}>
+              <Txt variant="label" tone="onBrand">
+                {fmtInt(requests)}
+              </Txt>
+            </View>
+          ) : null}
+          <Icon name="chevronRight" size={20} color={palette.inkFaint} />
+        </Press>
+        <View style={[styles.row, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.line }]}>
+          <Icon name="cuaderno" size={20} color={palette.inkSoft} />
+          <View style={styles.fill}>
+            <Txt variant="bodyStrong" nativeID="share-label">
+              Compartir mi álbum
+            </Txt>
+            <Txt variant="small" tone="soft">
+              Tus amigos verán tus especies y pegatinas. Nunca dónde las viste.
+            </Txt>
+          </View>
+          <Switch
+            value={profile?.shareAlbum ?? false}
+            disabled={busy}
+            onValueChange={(on) => void setShareAlbum(on)}
+            accessibilityLabelledBy="share-label"
+            accessibilityLabel="Compartir mi álbum con mis amigos"
+            trackColor={{ false: palette.lineStrong, true: palette.brand }}
+            thumbColor={palette.surface}
+            ios_backgroundColor={palette.lineStrong}
+          />
+        </View>
+      </Card>
+      {albumError ? (
+        <Txt variant="small" tone="danger" style={styles.gap}>
+          {albumError}
+        </Txt>
+      ) : null}
+    </Section>
+  );
+}
+
+function RarityAlertsRow() {
+  const palette = usePalette();
+  const on = useSettings((s) => s.rarityAlerts);
+  const setOn = useSettings((s) => s.setRarityAlerts);
+  const [busy, setBusy] = useState(false);
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      if (!next) {
+        await disableRarityAlerts();
+        setOn(false);
+        return;
+      }
+      const res = await enableRarityAlerts();
+      if (res === 'ok') setOn(true);
+      else
+        Alert.alert(
+          'No se pueden activar los avisos',
+          res === 'denied' ? 'Permite las notificaciones de Zarpa en los ajustes del móvil.' : 'Este móvil no permite tareas en segundo plano.',
+        );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card tone="outline" padding={0} style={styles.gap}>
+      <View style={styles.row}>
+        <Icon name="star" size={20} color={palette.inkSoft} />
+        <View style={styles.fill}>
+          <Txt variant="bodyStrong" nativeID="rarity-label">
+            Avisarme de rarezas cerca
+          </Txt>
+          <Txt variant="small" tone="soft">
+            Una notificación si se confirma una especie rara a menos de 50 km. Tu ubicación no sale del móvil.
+          </Txt>
+        </View>
+        <Switch
+          value={on}
+          disabled={busy}
+          onValueChange={(v) => void toggle(v)}
+          accessibilityLabelledBy="rarity-label"
+          accessibilityLabel="Avisarme de rarezas cerca"
+          trackColor={{ false: palette.lineStrong, true: palette.brand }}
+          thumbColor={palette.surface}
+          ios_backgroundColor={palette.lineStrong}
+        />
+      </View>
+    </Card>
+  );
+}
+
+function InatRow() {
+  const palette = usePalette();
+  const status = useInat((s) => s.status);
+  const login = useInat((s) => s.login);
+  const busy = useInat((s) => s.busy);
+  useEffect(() => {
+    void loadInat();
+  }, []);
+  if (!inatEnabled) return null;
+  const connected = status === 'connected';
+  const toggle = () => {
+    if (connected) {
+      Alert.alert('Desconectar iNaturalist', 'Zarpa dejará de poder publicar en tu cuenta. Lo ya publicado sigue en iNaturalist.', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Desconectar', style: 'destructive', onPress: () => void disconnectInat() },
+      ]);
+      return;
+    }
+    connectInat().catch((e) => {
+      if (!(e instanceof InatCancelled)) Alert.alert('No se pudo conectar', e instanceof InatError ? e.message : 'Inténtalo de nuevo.');
+    });
+  };
+  return (
+    <Card tone="outline" padding={0} style={styles.gap}>
+      <Press disabled={busy} onPress={toggle} accessibilityRole="button" style={styles.row}>
+        <Icon name="globe" size={20} color={palette.inkSoft} />
+        <View style={styles.fill}>
+          <Txt variant="bodyStrong">iNaturalist</Txt>
+          <Txt variant="small" tone="soft">
+            {connected ? `Conectado como @${login}` : 'Conecta tu cuenta para aportar tus avistamientos a la ciencia'}
+          </Txt>
+        </View>
+        <Txt variant="bodyStrong" tone={connected ? 'danger' : 'brand'}>
+          {busy ? '…' : connected ? 'Desconectar' : 'Conectar'}
+        </Txt>
+      </Press>
+    </Card>
   );
 }
 
@@ -271,6 +424,8 @@ export default function Perfil() {
           <AchievementsStrip />
         </Appear>
 
+        {signedIn ? <SocialSection /> : null}
+
         {signedIn ? (
           <Section title="Copia en la nube" icon="globe" accent={palette.sky} tint={palette.skyTint}>
             <Card tone="outline">
@@ -342,6 +497,8 @@ export default function Perfil() {
               />
             </View>
           </Card>
+          <RarityAlertsRow />
+          <InatRow />
         </Section>
 
         {signedIn ? (
@@ -398,4 +555,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, minHeight: HIT },
   wide: { height: HIT + 4, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', marginTop: space.md },
   danger: { borderWidth: 1.5 },
+  badge: { minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
 });

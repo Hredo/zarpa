@@ -7,6 +7,9 @@ type State = {
   kidsMode: boolean;
   setKidsMode: (on: boolean) => void;
   toggleKidsMode: () => void;
+  /** Avisos en segundo plano de rarezas cerca (lib/rarityAlerts.ts). */
+  rarityAlerts: boolean;
+  setRarityAlerts: (on: boolean) => void;
 };
 
 /**
@@ -21,11 +24,13 @@ export const useSettings = create<State>()(
       kidsMode: false,
       setKidsMode: (on) => set({ kidsMode: on }),
       toggleKidsMode: () => set((s) => ({ kidsMode: !s.kidsMode })),
+      rarityAlerts: false,
+      setRarityAlerts: (on) => set({ rarityAlerts: on }),
     }),
     {
       name: 'zarpa-settings',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ kidsMode: s.kidsMode }),
+      partialize: (s) => ({ kidsMode: s.kidsMode, rarityAlerts: s.rarityAlerts }),
     },
   ),
 );

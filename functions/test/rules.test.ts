@@ -178,12 +178,89 @@ describe('avistamientos', () => {
   });
 });
 
-describe('lo social sigue cerrado', () => {
-  it('nadie lee ni escribe publicProfiles, follows ni colecciones desconocidas', async () => {
-    await assertFails(getDoc(doc(ana(), 'publicProfiles/ana')));
+describe('lo social', () => {
+  const album = (over: Record<string, unknown> = {}) => ({
+    species_id: 42,
+    count: 3,
+    first: '2026-04',
+    last: '2026-10',
+    sticker: '3f2c-aa',
+    sticker_ext: 'png',
+    updated_at: '2026-10-05T10:00:00.000Z',
+    ...over,
+  });
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const f = ctx.firestore();
+      await setDoc(doc(f, 'users/ana'), { alias: 'Ana', photoURL: null, createdAt: new Date(), counters: { sightings: 0 }, shareAlbum: true });
+      await setDoc(doc(f, 'users/ana/friends/bea'), { alias: 'Bea' });
+      await setDoc(doc(f, 'users/bea/friends/ana'), { alias: 'Ana' });
+      await setDoc(doc(f, 'users/ana/album/42'), album());
+      await setDoc(doc(f, 'users/ana/friendRequests/cai'), { from: 'cai', alias: 'Cai' });
+      await setDoc(doc(f, 'publicProfiles/ana'), { alias: 'Ana', shareAlbum: true });
+      await setDoc(doc(f, 'friendCodes/ABCDEFGH'), { uid: 'ana' });
+    });
+  });
+
+  const cai = () => env.authenticatedContext('cai').firestore();
+
+  it('el dueño activa y desactiva compartir su álbum', async () => {
+    await assertSucceeds(updateDoc(doc(ana(), 'users/ana'), { shareAlbum: false, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { shareAlbum: 'si', updatedAt: serverTimestamp() }));
+  });
+
+  it('los amigos ven el álbum compartido; los demás no', async () => {
+    await assertSucceeds(getDoc(doc(ana(), 'users/ana/album/42')));
+    await assertSucceeds(getDoc(doc(bea(), 'users/ana/album/42')));
+    await assertFails(getDoc(doc(cai(), 'users/ana/album/42')));
+    await assertFails(getDoc(doc(anon(), 'users/ana/album/42')));
+  });
+
+  it('sin compartir, ni los amigos lo ven', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => updateDoc(doc(ctx.firestore(), 'users/ana'), { shareAlbum: false }));
+    await assertFails(getDoc(doc(bea(), 'users/ana/album/42')));
+    await assertFails(setDoc(doc(ana(), 'users/ana/album/7'), album({ species_id: 7 })));
+  });
+
+  it('solo el dueño escribe su álbum, y sin lugares ni campos extra', async () => {
+    await assertSucceeds(setDoc(doc(ana(), 'users/ana/album/7'), album({ species_id: 7 })));
+    await assertFails(setDoc(doc(bea(), 'users/ana/album/8'), album({ species_id: 8 })));
+    await assertFails(setDoc(doc(ana(), 'users/ana/album/9'), album({ species_id: 9, lat: 40.4 })));
+    await assertFails(setDoc(doc(ana(), 'users/ana/album/10'), album({ species_id: 11 })));
+    await assertFails(setDoc(doc(ana(), 'users/ana/album/12'), album({ species_id: 12, first: 'ayer' })));
+    await assertSucceeds(deleteDoc(doc(ana(), 'users/ana/album/42')));
+  });
+
+  it('amistades y solicitudes: se leen las propias y no se escriben desde la app', async () => {
+    await assertSucceeds(getDoc(doc(ana(), 'users/ana/friends/bea')));
+    await assertSucceeds(getDoc(doc(ana(), 'users/ana/friendRequests/cai')));
+    await assertFails(getDoc(doc(bea(), 'users/ana/friendRequests/cai')));
+    await assertFails(setDoc(doc(cai(), 'users/ana/friends/cai'), { alias: 'Cai' }));
+    await assertFails(setDoc(doc(cai(), 'users/ana/friendRequests/cai'), { from: 'cai' }));
+    await assertFails(deleteDoc(doc(bea(), 'users/bea/friends/ana')));
+  });
+
+  it('perfiles públicos: los lee quien tiene cuenta; nadie los escribe; los códigos son secretos', async () => {
+    await assertSucceeds(getDoc(doc(cai(), 'publicProfiles/ana')));
+    await assertFails(getDoc(doc(anon(), 'publicProfiles/ana')));
     await assertFails(setDoc(doc(ana(), 'publicProfiles/ana'), { alias: 'Ana' }));
-    await assertFails(setDoc(doc(ana(), 'follows/ana_bea'), { a: 1 }));
+    await assertFails(getDoc(doc(cai(), 'friendCodes/ABCDEFGH')));
     await assertFails(setDoc(doc(ana(), 'cualquiera/x'), { a: 1 }));
+  });
+
+  it('las pegatinas se comparten con los amigos; la foto y la voz, no', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const st = (uid: string) => env.authenticatedContext(uid).storage();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await uploadBytes(ref(ctx.storage(), 'users/ana/sightings/3f2c-aa.sticker.png'), png, { contentType: 'image/png' });
+      await uploadBytes(ref(ctx.storage(), 'users/ana/sightings/3f2c-aa.jpg'), png, { contentType: 'image/jpeg' });
+      await uploadBytes(ref(ctx.storage(), 'users/ana/sightings/3f2c-aa.voice.m4a'), png, { contentType: 'audio/mp4' });
+    });
+    await assertSucceeds(getBytes(ref(st('bea'), 'users/ana/sightings/3f2c-aa.sticker.png')));
+    await assertFails(getBytes(ref(st('cai'), 'users/ana/sightings/3f2c-aa.sticker.png')));
+    await assertFails(getBytes(ref(st('bea'), 'users/ana/sightings/3f2c-aa.jpg')));
+    await assertFails(getBytes(ref(st('bea'), 'users/ana/sightings/3f2c-aa.voice.m4a')));
   });
 });
 

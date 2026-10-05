@@ -161,3 +161,12 @@ export async function saveAlias(uid: string, alias: string): Promise<void> {
     throw messageFor(e);
   }
 }
+
+/** Activa o desactiva compartir el álbum con los amigos (al desactivarlo, el servidor lo retira). */
+export async function saveShareAlbum(uid: string, on: boolean): Promise<void> {
+  try {
+    await updateDoc(doc(fb().db, 'users', uid), { shareAlbum: on, updatedAt: serverTimestamp() });
+  } catch (e) {
+    throw messageFor(e);
+  }
+}

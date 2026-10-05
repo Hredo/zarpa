@@ -3,3 +3,5 @@ allowBuilds:
   '@firebase/util': false
   protobufjs: false
   esbuild: true
+  '@parcel/watcher': false
+  unrs-resolver: false

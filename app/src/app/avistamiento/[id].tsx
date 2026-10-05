@@ -11,6 +11,7 @@ import { DiarySection } from '@/components/diario/DiarySection';
 import { ShareCromoButton } from '@/components/ficha/ShareCromoButton';
 import { GroupPill } from '@/components/GroupPill';
 import { HoloSticker } from '@/components/HoloSticker';
+import { InatCard } from '@/components/InatCard';
 import { Icon } from '@/components/Icon';
 import { Appear } from '@/components/motion';
 import { Press } from '@/components/Press';
@@ -200,6 +201,13 @@ export default function Avistamiento() {
           </Card>
 
           <DiarySection sighting={s} onPatch={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))} />
+
+          <InatCard
+            sighting={s}
+            sci={sp?.sci}
+            sensitive={!!sp && (['VU', 'EN', 'CR'].includes(sp.iucn ?? '') || sp.rarity >= 4)}
+            onPatch={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
+          />
 
           <Txt variant="subheading" style={{ marginTop: space.xl, marginBottom: space.sm }}>
             Foto original

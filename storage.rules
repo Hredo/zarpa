@@ -8,6 +8,8 @@ rules_version = '2';
  *   {id}.jpg            la foto (JPEG, hasta 10 MB)
  *   {id}.sticker.png    la pegatina recortada (PNG; JPEG si no hubo recorte), hasta 10 MB
  *   {id}.voice.m4a      la nota de voz del diario (audio, hasta 5 MB; m4a, aac, mp4, caf o 3gp)
+ * Las pegatinas las ven también los amigos de su dueño si este comparte su
+ * álbum (`shareAlbum`); la foto completa y la nota de voz, nunca.
  * El catálogo de especies es público y de solo lectura en catalog/: lo publica
  * el pipeline de datos con credenciales de administrador, nunca la app.
  * Lo social (fotos visibles para otros) se abrirá en una ruta propia, aparte.
@@ -37,7 +39,16 @@ service firebase.storage {
           && size(5 * 1024 * 1024);
       }
 
-      allow read: if owner();
+      function stickerFile() {
+        return file.matches('[A-Za-z0-9_-]{1,64}[.]sticker[.](png|jpg)');
+      }
+      function friendWithSharedAlbum() {
+        return request.auth != null
+          && firestore.exists(/databases/(default)/documents/users/$(uid)/friends/$(request.auth.uid))
+          && firestore.get(/databases/(default)/documents/users/$(uid)).data.get('shareAlbum', false) == true;
+      }
+
+      allow read: if owner() || (stickerFile() && friendWithSharedAlbum());
       allow create, update: if owner() && (photo() || sticker() || voice());
       allow delete: if owner();
     }

@@ -53,6 +53,9 @@ export type DiaryFields = WeatherFields & {
   voice_ms: number | null;
   day_phase: string | null;
   updated_at: string | null;
+  /** Observación de iNaturalist a la que se aportó (migración 5). */
+  inat_id?: number | null;
+  inat_uploaded_at?: string | null;
 };
 
 export type NewSighting = Omit<Sighting, 'id' | 'created_at' | 'verified' | keyof DiaryFields> & {
@@ -61,7 +64,7 @@ export type NewSighting = Omit<Sighting, 'id' | 'created_at' | 'verified' | keyo
 
 /** Campos que el usuario o la app pueden cambiar después de fichar. */
 export type SightingPatch = Partial<
-  Pick<Sighting, 'note' | 'voice_note' | 'voice_ms' | 'breed_id' | 'place'> & WeatherFields
+  Pick<Sighting, 'note' | 'voice_note' | 'voice_ms' | 'breed_id' | 'place' | 'inat_id' | 'inat_uploaded_at'> & WeatherFields
 >;
 
 /** Tonos de las capas del Atlas: ocho matices que se distinguen entre sí y del mapa. */

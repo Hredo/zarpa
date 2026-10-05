@@ -7,6 +7,10 @@ import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import * as v1 from 'firebase-functions/v1';
 
+import { cleanupSocial, ensureFriendCode } from './social';
+
+export { getFriendCode, onAlbumWrite, onProfileWrite, removeFriend, respondFriendRequest, sendFriendRequest } from './social';
+
 /*
  * Funciones de Zarpa. Región única: europe-west1 (cerca de los datos, eur3).
  *
@@ -16,6 +20,7 @@ import * as v1 from 'firebase-functions/v1';
  *                  Las tiendas lo exigen (Apple 5.1.1(v), Google Play).
  *   onSightingWrite mantiene el contador de avistamientos del perfil. El
  *                  cliente no puede escribir contadores: así no se falsean.
+ *   social.ts      amigos por código y álbum compartido (ver allí).
  */
 
 const REGION = 'europe-west1';
@@ -36,11 +41,13 @@ export const onUserCreate = v1.region(REGION).auth.user().onCreate(async (user) 
       photoURL: user.photoURL ?? null,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-      counters: { sightings: 0 },
+      counters: { sightings: 0, species: 0 },
+      shareAlbum: false,
     },
     { merge: true },
   );
   await ref.collection('private').doc('settings').set({ createdAt: FieldValue.serverTimestamp() }, { merge: true });
+  await ensureFriendCode(getFirestore(), user.uid);
   logger.info('Perfil creado', { uid: user.uid });
 });
 
@@ -60,6 +67,7 @@ export const deleteAccount = onCall({ region: REGION, enforceAppCheck: false, ti
   if (!uid) throw new HttpsError('unauthenticated', 'Hay que iniciar sesión para borrar la cuenta.');
   try {
     const db = getFirestore();
+    await cleanupSocial(db, uid);
     await db.recursiveDelete(db.doc(`users/${uid}`));
     await getStorage().bucket().deleteFiles({ prefix: `users/${uid}/`, force: true });
     await getAuth().deleteUser(uid);

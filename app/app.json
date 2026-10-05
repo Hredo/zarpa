@@ -24,7 +24,12 @@
     "android": {
       "package": "com.hrval.zarpa",
       "versionCode": 1,
-      "permissions": ["android.permission.CAMERA", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION", "android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -54,8 +59,20 @@
       "expo-asset",
       "expo-sharing",
       "expo-apple-authentication",
-      ["@react-native-google-signin/google-signin", { "iosUrlScheme": "com.googleusercontent.apps.REEMPLAZAR-POR-EL-ID-DE-CLIENTE-IOS" }],
-      ["expo-audio", { "microphonePermission": "Zarpa usa el micrófono solo cuando pulsas «Grabar» para guardar una nota de voz en un avistamiento. Las grabaciones se quedan en tu móvil.", "recordAudioAndroid": true, "enableBackgroundPlayback": false }],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.REEMPLAZAR-POR-EL-ID-DE-CLIENTE-IOS"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Zarpa usa el micrófono solo cuando pulsas «Grabar» para guardar una nota de voz en un avistamiento. Las grabaciones se quedan en tu móvil.",
+          "recordAudioAndroid": true,
+          "enableBackgroundPlayback": false
+        }
+      ],
       [
         "expo-location",
         {
@@ -75,8 +92,20 @@
         {
           "android": {
             "minSdkVersion": 26,
-            "buildArchs": ["arm64-v8a"]
+            "buildArchs": [
+              "arm64-v8a"
+            ]
           }
+        }
+      ],
+      "expo-secure-store",
+      "expo-background-task",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#FF7A1A",
+          "defaultChannel": "rarezas"
         }
       ]
     ],

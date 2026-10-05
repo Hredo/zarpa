@@ -2,7 +2,7 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { create } from 'zustand';
 
-import { AuthCancelled, AuthError, cleanAlias, deleteAccount, saveAlias, signInWithApple, signInWithGoogle, signOutUser } from '@/lib/auth';
+import { AuthCancelled, AuthError, cleanAlias, deleteAccount, saveAlias, saveShareAlbum, signInWithApple, signInWithGoogle, signOutUser } from '@/lib/auth';
 import { fb, firebaseEnabled } from '@/lib/firebase';
 
 /*
@@ -27,7 +27,15 @@ export type AccountUser = {
   createdAt: string | null;
 };
 
-export type Profile = { alias: string; photoURL: string | null; sightings: number };
+export type Profile = {
+  alias: string;
+  photoURL: string | null;
+  sightings: number;
+  /** Comparte su álbum (especies y pegatinas) con sus amigos. */
+  shareAlbum: boolean;
+  /** Código para que otra persona le añada como amigo (lo asigna el servidor). */
+  friendCode: string | null;
+};
 
 type State = {
   status: AuthStatus;
@@ -42,6 +50,7 @@ type State = {
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<boolean>;
   setAlias: (alias: string) => Promise<boolean>;
+  setShareAlbum: (on: boolean) => Promise<boolean>;
   clearError: () => void;
 };
 
@@ -96,6 +105,12 @@ export const useAuth = create<State>((set, get) => {
         if (!uid) return;
         await saveAlias(uid, alias);
       }),
+    setShareAlbum: (on) =>
+      run(async () => {
+        const uid = get().user?.uid;
+        if (!uid) return;
+        await saveShareAlbum(uid, on);
+      }),
     clearError: () => set({ error: null }),
   };
 });
@@ -123,7 +138,7 @@ export function startAuth(): void {
       status: 'signedIn',
       user,
       // Mientras llega el perfil de la nube, lo que sabe la cuenta de Google/Apple.
-      profile: { alias: cleanAlias(user.displayName ?? '') || 'Explorador', photoURL: user.photoURL, sightings: 0 },
+      profile: { alias: cleanAlias(user.displayName ?? '') || 'Explorador', photoURL: user.photoURL, sightings: 0, shareAlbum: false, friendCode: null },
     });
     // El perfil lo crea una función al darse de alta: puede tardar un instante.
     stopProfile = onSnapshot(
@@ -136,6 +151,8 @@ export function startAuth(): void {
             alias: typeof d.alias === 'string' && d.alias ? d.alias : 'Explorador',
             photoURL: typeof d.photoURL === 'string' ? d.photoURL : null,
             sightings: typeof d.counters?.sightings === 'number' ? d.counters.sightings : 0,
+            shareAlbum: d.shareAlbum === true,
+            friendCode: typeof d.friendCode === 'string' ? d.friendCode : null,
           },
         });
       },

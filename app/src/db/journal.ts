@@ -99,6 +99,11 @@ const MIGRATIONS: string[] = [
   ) WITHOUT ROWID;
   CREATE INDEX excursion_started ON excursion (started_at DESC);
   `,
+  // 5 · aportación a iNaturalist: id de la observación publicada y cuándo.
+  `
+  ALTER TABLE sighting ADD COLUMN inat_id INTEGER;
+  ALTER TABLE sighting ADD COLUMN inat_uploaded_at TEXT;
+  `,
 ];
 
 export const JOURNAL_VERSION = MIGRATIONS.length;
