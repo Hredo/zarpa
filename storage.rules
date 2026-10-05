@@ -1,0 +1,56 @@
+rules_version = '2';
+
+/*
+ * Reglas de Cloud Storage de Zarpa.
+ *
+ * Cada avistamiento puede tener, junto a su documento de Firestore, hasta tres
+ * ficheros en users/{uid}/sightings/, y solo su dueño los lee o los escribe:
+ *   {id}.jpg            la foto (JPEG, hasta 10 MB)
+ *   {id}.sticker.png    la pegatina recortada (PNG; JPEG si no hubo recorte), hasta 10 MB
+ *   {id}.voice.m4a      la nota de voz del diario (audio, hasta 5 MB; m4a, aac, mp4, caf o 3gp)
+ * El catálogo de especies es público y de solo lectura en catalog/: lo publica
+ * el pipeline de datos con credenciales de administrador, nunca la app.
+ * Lo social (fotos visibles para otros) se abrirá en una ruta propia, aparte.
+ */
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{uid}/sightings/{file} {
+      function owner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      function size(max) {
+        return request.resource.size > 0 && request.resource.size <= max;
+      }
+      function photo() {
+        return file.matches('[A-Za-z0-9_-]{1,64}[.]jpg')
+          && request.resource.contentType == 'image/jpeg'
+          && size(10 * 1024 * 1024);
+      }
+      function sticker() {
+        return ((file.matches('[A-Za-z0-9_-]{1,64}[.]sticker[.]png') && request.resource.contentType == 'image/png')
+            || (file.matches('[A-Za-z0-9_-]{1,64}[.]sticker[.]jpg') && request.resource.contentType == 'image/jpeg'))
+          && size(10 * 1024 * 1024);
+      }
+      function voice() {
+        return file.matches('[A-Za-z0-9_-]{1,64}[.]voice[.](m4a|aac|mp4|caf|3gp)')
+          && request.resource.contentType.matches('audio/[a-z0-9.+-]{1,40}')
+          && size(5 * 1024 * 1024);
+      }
+
+      allow read: if owner();
+      allow create, update: if owner() && (photo() || sticker() || voice());
+      allow delete: if owner();
+    }
+
+    // Catálogo de especies (base SQLite versionada y su manifiesto): lectura
+    // pública para que la app lo baje sin cuenta. Solo escribe el Admin SDK.
+    match /catalog/{file=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -13,6 +13,9 @@ import { IucnScale } from '@/components/ficha/IucnScale';
 import { LifeStyle } from '@/components/ficha/LifeStyle';
 import { ReadMore } from '@/components/ficha/ReadMore';
 import { HourBars, MonthBars, peakMonths } from '@/components/ficha/SeasonChart';
+import { ShareCromoButton } from '@/components/ficha/ShareCromoButton';
+import { SizeCompare } from '@/components/ficha/SizeCompare';
+import { SoundSection } from '@/components/ficha/SoundSection';
 import { Tag } from '@/components/ficha/Tag';
 import { GroupPill } from '@/components/GroupPill';
 import { Icon, type IconName } from '@/components/Icon';
@@ -36,9 +39,11 @@ import {
   type City,
   getProvenance,
   getSources,
+  getSize,
   getSpecies,
   type CountryPresence,
   type Provenance,
+  type SizeInfo,
   type Source,
   type SpeciesDetail,
   type SpeciesImage,
@@ -48,8 +53,12 @@ import { COUNTRY_NAME } from '@/lib/countries';
 import { fmtAgo, fmtDate, fmtInt } from '@/lib/format';
 import { AUTHORITY_LABEL, GROUP_BY_CODE, IUCN_LABEL, rarityInfo } from '@/lib/groups';
 import { useLastLocation, useUserCountry } from '@/lib/location';
+import { kidsFacts } from '@/lib/kids';
 import { displayName } from '@/lib/speciesName';
-import { seasonality, similarSpecies, type Fetched, type Histogram, type Similar } from '@/lib/remote';
+import { SOUND_GROUPS, type Sound } from '@/lib/sounds';
+import { speciesSounds } from '@/lib/soundsRemote';
+import { MIN_HOUR_SAMPLE, seasonality, similarSpecies, type Fetched, type Histogram, type Similar } from '@/lib/remote';
+import { useSettings } from '@/store/settings';
 import { sightingsOf, useJournal, type Sighting } from '@/store/journal';
 import { fonts, groupColor, radius, space, usePalette } from '@/theme';
 
@@ -97,6 +106,10 @@ export default function Ficha() {
   const [breedPreview, setBreedPreview] = useState<{ cc: string | null; rows: BreedRow[] }>({ cc: null, rows: [] });
   const [cities, setCities] = useState<City[]>([]);
   const [similarNames, setSimilarNames] = useState<Record<number, string | null>>({});
+  const [sounds, setSounds] = useState<Sound[]>([]);
+  const [size, setSize] = useState<SizeInfo | null>(null);
+  const kids = useSettings((s) => s.kidsMode);
+  const toggleKids = useSettings((s) => s.toggleKidsMode);
 
   const saved = useJournal((s) => s.saved.has(speciesId));
   const caughtCount = useJournal((s) => s.caught.get(speciesId) ?? 0);
@@ -118,7 +131,23 @@ export default function Ficha() {
     touchRecent(speciesId).catch(() => {});
     similarSpecies(speciesId).then(setSimilar);
     breedTotals(speciesId).then(setBreedCount);
+    getSize(speciesId).then(setSize).catch(() => setSize(null));
   }, [speciesId, touchRecent]);
+
+  // Cantos y sonidos (iNaturalist, CC): solo para grupos que suenan; sin sonido no hay sección.
+  const grp = sp?.grp;
+  useEffect(() => {
+    if (!grp || !SOUND_GROUPS.has(grp)) return;
+    let alive = true;
+    speciesSounds(speciesId)
+      .then((r) => {
+        if (alive) setSounds(r?.data ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [speciesId, grp]);
 
   // Avance de razas: primero las del país del usuario, si las hay.
   useEffect(() => {
@@ -218,7 +247,28 @@ export default function Ficha() {
     sp.medium > 0 || sp.envs > 0 || !!sp.diet || !!sp.diet_detail || !!sp.repro || !!sp.activity || !!sp.migration || sp.domestic > 0;
   const freq = Math.min(1, Math.log10(sp.rg_obs + 1) / 6);
   const rarityColor = sp.rarity <= 2 ? palette.leaf : sp.rarity === 3 ? palette.brand : sp.rarity === 4 ? palette.red : palette.strong;
-  const hasHours = !!season?.data && season.data.hours.some((h) => h > 0);
+  const hasHours = !!season?.data && season.data.hoursSample >= MIN_HOUR_SAMPLE;
+
+  const sizeCredit =
+    [...new Set(prov.filter((p) => (p.field === 'mass_g' || p.field === 'length_mm') && p.sources).flatMap((p) => p.sources.split(',')))]
+      .map((c) => sourceByCode[c]?.label ?? c)
+      .join(', ') || null;
+  const sizeShown = size && (size.mass_g != null || size.length_mm != null) ? size : null;
+  const facts = kids
+    ? kidsFacts({
+        grp: sp.grp,
+        singular: group?.singular ?? 'Animal',
+        diet: sp.diet,
+        medium: sp.medium,
+        countries: visibleCountries.length,
+        endemic: visibleCountries.filter((c) => c.means === 'endemic').map((c) => COUNTRY_NAME[c.cc] ?? c.cc),
+        iucn: sp.iucn,
+        rarity: sp.rarity,
+        domestic: sp.domestic,
+        mass_g: sizeShown?.mass_g,
+        length_mm: sizeShown?.length_mm,
+      })
+    : [];
 
   // Lo que distingue a la especie, solo de datos verificados del catálogo.
   const endemic = visibleCountries.filter((c) => c.means === 'endemic').map((c) => COUNTRY_NAME[c.cc] ?? c.cc);
@@ -307,9 +357,56 @@ export default function Ficha() {
             <View style={styles.credit}>
               <PhotoCredit image={images[page]} onOpen={(url) => WebBrowser.openBrowserAsync(url)} />
             </View>
+            <View style={styles.actionsRow}>
+              <ShareCromoButton species={sp} image={images[page] ?? images[0] ?? null} />
+              <Press
+                haptic
+                onPress={() => router.push({ pathname: '/comparar', params: { a: String(sp.id) } })}
+                accessibilityRole="button"
+                accessibilityLabel="Comparar con otra especie"
+                style={[styles.actionBtn, { backgroundColor: palette.surface, borderColor: palette.lineStrong }]}>
+                <Icon name="layers" size={20} />
+                <Txt variant="bodyStrong">Comparar</Txt>
+              </Press>
+              <Press
+                haptic
+                onPress={toggleKids}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: kids }}
+                accessibilityLabel="Modo niños: ficha sencilla con letra grande"
+                style={[
+                  styles.actionBtn,
+                  kids ? { backgroundColor: palette.strong, borderColor: palette.strong } : { backgroundColor: palette.surface, borderColor: palette.lineStrong },
+                ]}>
+                <Txt variant="bodyStrong" tone={kids ? 'onStrong' : 'ink'}>
+                  Aa
+                </Txt>
+                <Txt variant="label" tone={kids ? 'onStrong' : 'soft'}>
+                  Niños
+                </Txt>
+              </Press>
+            </View>
           </Appear>
 
+          {kids && (
+            <Appear index={ix()}>
+              <View style={styles.kidsList}>
+                {facts.map((f) => (
+                  <View key={f.text} style={[styles.kidsFact, { backgroundColor: g.tint }]}>
+                    <View style={[styles.kidsIcon, { backgroundColor: palette.surface }]}>
+                      <Icon name={f.icon} size={36} color={g.color} strokeWidth={2.1} />
+                    </View>
+                    <Txt variant="heading" style={styles.flex}>
+                      {f.text}
+                    </Txt>
+                  </View>
+                ))}
+              </View>
+            </Appear>
+          )}
+
           {/* Cifras: contadores que suben al abrir la ficha. */}
+          {!kids && (
           <Appear index={ix()} style={styles.stats}>
             <StatTile icon="eye" value={sp.rg_obs} label="avistamientos confirmados" color={g.color} tint={g.tint} delay={150} />
             {visibleCountries.length > 0 && (
@@ -333,8 +430,10 @@ export default function Ficha() {
               />
             ) : null}
           </Appear>
+          )}
 
           {/* Qué fácil es verla y cómo está de amenazada. */}
+          {!kids && (
           <Appear index={ix()}>
             <Card style={styles.statusCard}>
               <View style={styles.rarityHead}>
@@ -356,6 +455,7 @@ export default function Ficha() {
               ) : null}
             </Card>
           </Appear>
+          )}
 
           {/* Tu cromo */}
           <Appear index={ix()}>
@@ -401,7 +501,23 @@ export default function Ficha() {
             </View>
           </Appear>
 
-          {paragraphs.length > 0 ? (
+          {sounds.length > 0 && (
+            <Appear index={ix()}>
+              <Section title="Cómo suena" icon="sparkle" accent={g.ink} tint={g.tint}>
+                <SoundSection sounds={sounds} group={g} big={kids} />
+              </Section>
+            </Appear>
+          )}
+
+          {sizeShown && (
+            <Appear index={ix()}>
+              <Section title={kids ? '¿Cuánto mide?' : 'Su tamaño'} icon="ruler" accent={g.ink} tint={g.tint}>
+                <SizeCompare size={sizeShown} grp={sp.grp} group={g} name={name} credit={sizeCredit} big={kids} />
+              </Section>
+            </Appear>
+          )}
+
+          {!kids && paragraphs.length > 0 ? (
             <Appear index={ix()}>
               <Section title="Quién es" icon="sparkle" accent={g.color} tint={g.tint}>
                 <ReadMore paragraphs={paragraphs} accent={g.ink} />
@@ -421,7 +537,7 @@ export default function Ficha() {
             </Appear>
           ) : null}
 
-          {highlights.length > 0 && (
+          {!kids && highlights.length > 0 && (
             <Appear index={ix()}>
               <Section title="Lo que la distingue" icon="star" accent={palette.brandInk} tint={palette.brandTint}>
                 <View style={styles.highlights}>
@@ -446,7 +562,7 @@ export default function Ficha() {
             </Appear>
           )}
 
-          {hasLife && (
+          {!kids && hasLife && (
             <Appear index={ix()}>
               <Section title="Cómo vive" icon="leaf" accent={palette.leaf} tint={palette.leafTint}>
                 <LifeStyle
@@ -464,7 +580,7 @@ export default function Ficha() {
             </Appear>
           )}
 
-          {season?.data && season.data.total > 0 && (
+          {!kids && season?.data && season.data.total > 0 && (
             <Appear index={ix()}>
               <Section title="Cuándo verla" icon="calendar" accent={palette.sky} tint={palette.skyTint}>
                 <Txt variant="body" tone="soft" style={styles.lead}>
@@ -475,7 +591,7 @@ export default function Ficha() {
                 {hasHours && (
                   <>
                     <Txt variant="small" tone="soft" style={styles.subLead}>
-                      Por hora del día (hora local de cada observación)
+                      Por hora del día (hora local de cada observación; muestra al azar de {fmtInt(season.data.hoursSample)})
                     </Txt>
                     <HourBars values={season.data.hours} group={g} />
                   </>
@@ -487,7 +603,7 @@ export default function Ficha() {
             </Appear>
           )}
 
-          {visibleCountries.length > 0 && (
+          {!kids && visibleCountries.length > 0 && (
             <Appear index={ix()}>
               <Section
                 title="Dónde vive"
@@ -514,13 +630,15 @@ export default function Ficha() {
             </Appear>
           )}
 
+          {!kids && (
           <Appear index={ix()}>
             <Section title="Clasificación" icon="layers" accent={g.color} tint={g.tint}>
               <TaxonLadder rungs={rungs} variant="steps" color={g} />
             </Section>
           </Appear>
+          )}
 
-          {breedTotal > 0 && (
+          {!kids && breedTotal > 0 && (
             <Appear index={ix()}>
               <Section
                 title="Razas"
@@ -548,35 +666,54 @@ export default function Ficha() {
             </Appear>
           )}
 
-          {similar?.data && similar.data.length > 0 && (
+          {!kids && similar?.data && similar.data.length > 0 && (
             <Appear index={ix()}>
               <Section title="Con qué se confunde" icon="eye" accent={palette.red} tint={palette.redTint}>
                 <Txt variant="body" tone="soft" style={styles.lead}>
                   Especies que la comunidad identificó por error como esta y corrigió después. Si dudas, compáralas.
                 </Txt>
                 {similar.data.map((s) => (
-                  <Press
-                    key={s.id}
-                    onPress={() => router.push({ pathname: '/especie/[id]', params: { id: String(s.id) } })}
-                    style={[styles.similar, { borderBottomColor: palette.line }]}>
-                    <View style={styles.flex}>
-                      <Txt variant={similarNames[s.id] ? 'bodyStrong' : 'sci'}>{similarNames[s.id] ?? s.sci}</Txt>
-                      {similarNames[s.id] ? (
-                        <Txt variant="sci" tone="soft" numberOfLines={1}>
-                          {s.sci}
+                  <View key={s.id} style={[styles.similar, { borderBottomColor: palette.line }]}>
+                    <Press
+                      onPress={() => router.push({ pathname: '/especie/[id]', params: { id: String(s.id) } })}
+                      style={styles.similarMain}>
+                      <View style={styles.flex}>
+                        <Txt variant={similarNames[s.id] ? 'bodyStrong' : 'sci'}>{similarNames[s.id] ?? s.sci}</Txt>
+                        {similarNames[s.id] ? (
+                          <Txt variant="sci" tone="soft" numberOfLines={1}>
+                            {s.sci}
+                          </Txt>
+                        ) : null}
+                        <Txt variant="data" tone="faint">
+                          {fmtInt(s.count)} confusiones
                         </Txt>
-                      ) : null}
-                    </View>
-                    <Txt variant="data" tone="faint">
-                      {fmtInt(s.count)} confusiones
-                    </Txt>
-                    <Icon name="chevronRight" size={18} color={palette.inkFaint} />
-                  </Press>
+                      </View>
+                      <Icon name="chevronRight" size={18} color={palette.inkFaint} />
+                    </Press>
+                    <Press
+                      haptic
+                      onPress={() => router.push({ pathname: '/comparar', params: { a: String(sp.id), b: String(s.id) } })}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Comparar con ${similarNames[s.id] ?? s.sci}`}
+                      style={[styles.compareLink, { backgroundColor: palette.redTint }]}>
+                      <Icon name="layers" size={18} color={palette.red} />
+                      <Txt variant="label" tone="red">
+                        Comparar con esta
+                      </Txt>
+                    </Press>
+                  </View>
                 ))}
               </Section>
             </Appear>
           )}
 
+          {kids && (
+            <Txt variant="small" tone="faint" style={styles.kidsCredit}>
+              Datos de iNaturalist, GBIF y la Lista Roja de la UICN. Fotos y sonidos con licencia libre; sus autores aparecen en cada uno.
+            </Txt>
+          )}
+
+          {!kids && (
           <Section title="Fuentes" icon="info" accent={palette.inkSoft} tint={palette.surfaceAlt}>
             <Txt variant="small" tone="soft" style={styles.lead}>
               Cada dato de esta ficha viene de su autoridad o de dos fuentes que coinciden. Lo que no cumple eso no se muestra.
@@ -610,6 +747,7 @@ export default function Ficha() {
               </Txt>
             ) : null}
           </Section>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -657,7 +795,15 @@ const styles = StyleSheet.create({
   highlight: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, borderRadius: radius.lg },
   lead: { marginBottom: space.md },
   subLead: { marginTop: space.lg, marginBottom: space.sm },
-  similar: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md, borderBottomWidth: StyleSheet.hairlineWidth },
+  similar: { paddingVertical: space.md, gap: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
+  similarMain: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 48 },
+  compareLink: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: space.md, borderRadius: radius.pill, alignSelf: 'flex-start' },
+  actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm, minHeight: 48, paddingHorizontal: space.lg, borderRadius: radius.pill, borderWidth: 1.5 },
+  kidsList: { gap: space.md, marginTop: space.xl },
+  kidsFact: { flexDirection: 'row', alignItems: 'center', gap: space.lg, padding: space.lg, borderRadius: radius.lg },
+  kidsIcon: { width: 64, height: 64, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
+  kidsCredit: { marginTop: space.xl },
   inlineBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 48, paddingHorizontal: space.md, borderRadius: radius.pill },
   textBtn: { minHeight: 48, justifyContent: 'center', paddingVertical: space.sm },
   provRow: { flexDirection: 'row', gap: space.md, paddingVertical: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },

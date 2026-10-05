@@ -1,3 +1,4 @@
+import { localHour } from '@/lib/remote';
 import { fmtAgo, fmtCoords, fmtInt } from '@/lib/format';
 
 describe('formatos en español', () => {
@@ -16,5 +17,14 @@ describe('formatos en español', () => {
     expect(fmtAgo('2026-10-04T08:00:00Z', now)).toBe('hoy');
     expect(fmtAgo('2026-10-03T08:00:00Z', now)).toBe('ayer');
     expect(fmtAgo('2026-09-20T08:00:00Z', now)).toBe('hace 14 días');
+  });
+});
+
+describe('hora local de iNaturalist', () => {
+  it('toma la hora del desfase de la observación, no la UTC', () => {
+    expect(localHour('2023-07-19T19:22:00-06:00')).toBe(19);
+    expect(localHour('2012-07-09T00:50:00+03:00')).toBe(0);
+    expect(localHour(null)).toBeNull();
+    expect(localHour('2012-07-09')).toBeNull();
   });
 });

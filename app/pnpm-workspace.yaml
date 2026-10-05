@@ -29,3 +29,7 @@ allowBuilds:
   # Descarga en el postinstall las bibliotecas precompiladas de Skia (sombreado
   # holográfico de las pegatinas). Sin ellas el build nativo no enlaza.
   '@shopify/react-native-skia': true
+  # Firebase JS: sus postinstall solo generan ayudas de desarrollo/telemetría
+  # que la app no necesita.
+  '@firebase/util': false
+  protobufjs: false

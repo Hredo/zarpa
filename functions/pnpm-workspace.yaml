@@ -1,0 +1,5 @@
+# Los postinstall de estos paquetes solo generan telemetría/ayudas de desarrollo.
+allowBuilds:
+  '@firebase/util': false
+  protobufjs: false
+  esbuild: true

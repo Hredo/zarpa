@@ -25,7 +25,12 @@ import { palette } from '@/theme';
  *   - una capa por especie guardada con las teselas vectoriales de densidad de
  *     GBIF (observaciones humanas): hexágonos hasta el zoom 11 y puntos exactos
  *     a partir de ahí, cada especie en su color;
- *   - los avistamientos del propio usuario.
+ *   - los avistamientos del propio usuario;
+ *   - «Mis avistamientos»: mapa de calor con la densidad de los puntos del
+ *     usuario y celdas punteadas de «zonas sin explorar» cerca de él;
+ *   - precarga de teselas (`warmTiles`) para el modo sin conexión: el WebView
+ *     las pide con `fetch` y el navegador las guarda en su caché HTTP, la misma
+ *     que usará el mapa (OpenFreeMap las sirve con caducidad de 10 años).
  */
 
 const MAPLIBRE = '5.24.0';
@@ -38,7 +43,15 @@ export type MapLayer = { key: number; hue: number; visible: boolean };
 export type MapPin = { id: string; lng: number; lat: number; label: string };
 export type MapTap = { lng: number; lat: number; zoom: number; hits: { key: number; total: number }[] };
 
+/** Capa personal: puntos [lng, lat] de los avistamientos y celdas [oeste, sur, este, norte] sin explorar. */
+export type HeatData = { visible: boolean; points: [number, number][]; cells: [number, number, number, number][] };
+export type Tile = { z: number; x: number; y: number };
+export type WarmProgress = { done: number; total: number; failed: number; finished?: boolean; error?: boolean };
+
 export type MapCanvasHandle = {
+  /** Pide en segundo plano estas teselas (y estilo, iconos y rótulos) para tenerlas en caché. */
+  warmTiles: (tiles: Tile[]) => void;
+  cancelWarm: () => void;
   flyTo: (lng: number, lat: number, zoom: number) => void;
   fitWorld: () => void;
   /**
@@ -57,7 +70,16 @@ type Props = {
   onTap?: (tap: MapTap) => void;
   /** El mapa terminó de cargar: ya acepta capas y órdenes de encuadre. */
   onReady?: () => void;
+  /** Capa «Mis avistamientos»; `null` o `visible: false` la oculta. */
+  heat?: HeatData | null;
+  /** Avance de `warmTiles`. */
+  onWarm?: (p: WarmProgress) => void;
   initial?: { lng: number; lat: number; zoom: number };
+};
+
+const rgba = (hex: string, a: number) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
 
 function html(nonce: string, dark: boolean, initial: { lng: number; lat: number; zoom: number }): string {
@@ -97,7 +119,58 @@ function html(nonce: string, dark: boolean, initial: { lng: number; lat: number;
     ['h','p'].forEach(function(s){ if (map.getSource(id+s)) map.removeSource(id+s); });
     delete layers[key];
   }
+  var warmToken = 0;
+  function ensureHeat(){
+    if (map.getSource('mine')) return;
+    map.addSource('mine', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
+    map.addSource('unexplored', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
+    map.addLayer({ id:'unexplored-fill', type:'fill', source:'unexplored', paint:{ 'fill-color':'${palette.sky}', 'fill-opacity':0.12 } }, 'pins');
+    map.addLayer({ id:'unexplored-line', type:'line', source:'unexplored', paint:{ 'line-color':'${palette.sky}', 'line-width':1.6, 'line-dasharray':[2,2] } }, 'pins');
+    map.addLayer({ id:'mine-heat', type:'heatmap', source:'mine', paint:{
+      'heatmap-weight':1,
+      'heatmap-intensity':['interpolate',['linear'],['zoom'],0,0.6,12,1.6],
+      'heatmap-radius':['interpolate',['linear'],['zoom'],0,6,8,22,13,46],
+      'heatmap-opacity':0.9,
+      'heatmap-color':['interpolate',['linear'],['heatmap-density'],0,'${rgba(palette.brand, 0)}',0.2,'${rgba(palette.sun, 0.6)}',0.5,'${rgba(palette.brand, 0.85)}',0.8,'${rgba(palette.red, 0.92)}',1,'${palette.brandInk}']
+    } }, 'pins');
+  }
   window.zarpa = {
+    setHeat: function(d){
+      ensureHeat();
+      var vis = d && d.visible ? 'visible' : 'none';
+      ['mine-heat','unexplored-fill','unexplored-line'].forEach(function(id){ map.setLayoutProperty(id,'visibility',vis); });
+      if (!d || !d.visible) return;
+      map.getSource('mine').setData({ type:'FeatureCollection', features:(d.points||[]).map(function(p){ return { type:'Feature', properties:{}, geometry:{ type:'Point', coordinates:[Number(p[0]),Number(p[1])] } }; }) });
+      map.getSource('unexplored').setData({ type:'FeatureCollection', features:(d.cells||[]).map(function(c){ var w=Number(c[0]),s=Number(c[1]),e=Number(c[2]),n=Number(c[3]); return { type:'Feature', properties:{}, geometry:{ type:'Polygon', coordinates:[[[w,s],[e,s],[e,n],[w,n],[w,s]]] } }; }) });
+    },
+    cancelWarm: function(){ warmToken++; },
+    warmTiles: function(tiles){
+      var token = ++warmToken, done = 0, failed = 0, next = 0, urls = [];
+      var ORIGIN = 'https://tiles.openfreemap.org/';
+      fetch(ORIGIN + 'planet').then(function(r){ return r.json(); }).then(function(tj){
+        var tpl = tj && tj.tiles && tj.tiles[0];
+        if (typeof tpl !== 'string' || tpl.indexOf(ORIGIN) !== 0) throw new Error('tilejson');
+        var st = map.getStyle() || {};
+        if (typeof st.sprite === 'string' && st.sprite.indexOf(ORIGIN) === 0) ['.json','.png','@2x.json','@2x.png'].forEach(function(x){ urls.push(st.sprite + x); });
+        var fonts = {};
+        (st.layers||[]).forEach(function(l){ var tf = l.layout && l.layout['text-font']; if (tf) fonts[tf.join(',')] = tf.join(','); });
+        if (typeof st.glyphs === 'string' && st.glyphs.indexOf(ORIGIN) === 0) Object.keys(fonts).forEach(function(f){ ['0-255','256-511'].forEach(function(r){ urls.push(st.glyphs.replace('{fontstack}', encodeURIComponent(f)).replace('{range}', r)); }); });
+        tiles.forEach(function(t){ urls.push(tpl.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y)); });
+        var total = urls.length;
+        function worker(){
+          if (token !== warmToken || next >= total) return Promise.resolve();
+          var u = urls[next++];
+          return fetch(u).then(function(r){ if (!r.ok) failed++; return r.arrayBuffer(); }).catch(function(){ failed++; }).then(function(){
+            done++;
+            if (token === warmToken && (done % 4 === 0 || done === total)) post({ type:'warm', done:done, total:total, failed:failed });
+            return worker();
+          });
+        }
+        return Promise.all([worker(), worker(), worker(), worker()]).then(function(){
+          if (token === warmToken) post({ type:'warm', done:done, total:total, failed:failed, finished:true });
+        });
+      }).catch(function(){ post({ type:'warm', done:done, total:urls.length, failed:failed, error:true }); });
+    },
     setLayers: function(list){
       var want = {}; list.forEach(function(l){ want[l.key]=l; });
       Object.keys(layers).forEach(function(k){ if (!want[k]) removeSpecies(k); });
@@ -162,7 +235,7 @@ function html(nonce: string, dark: boolean, initial: { lng: number; lat: number;
 </script></body></html>`;
 }
 
-export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({ dark, layers, pins, onTap, onReady, initial }, ref) {
+export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({ dark, layers, pins, onTap, onReady, initial, heat, onWarm }, ref) {
   const web = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
   // El HTML se genera una vez por montaje (cambiar de tema remonta el mapa):
@@ -178,6 +251,8 @@ export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({
   };
 
   useImperativeHandle(ref, () => ({
+    warmTiles: (tiles) => call('warmTiles', tiles.map((t) => ({ z: Math.trunc(t.z), x: Math.trunc(t.x), y: Math.trunc(t.y) }))),
+    cancelWarm: () => call('cancelWarm'),
     flyTo: (lng, lat, zoom) => call('flyTo', lng, lat, zoom),
     fitWorld: () => call('fitWorld'),
     fitToSpecies: (key) => call('fitToSpecies', Math.trunc(key)),
@@ -195,8 +270,22 @@ export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({
     });
   }, [ready, pins]);
 
+  useEffect(() => {
+    if (!ready) return;
+    call(
+      'setHeat',
+      heat
+        ? {
+            visible: !!heat.visible,
+            points: heat.points.map(([lng, lat]) => [Number(lng), Number(lat)]),
+            cells: heat.cells.map((c) => c.map(Number)),
+          }
+        : null,
+    );
+  }, [ready, heat]);
+
   const onMessage = (e: WebViewMessageEvent) => {
-    let msg: { type?: string } & Partial<MapTap>;
+    let msg: { type?: string } & Partial<MapTap> & Partial<WarmProgress>;
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
@@ -205,6 +294,15 @@ export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({
     if (msg.type === 'ready') {
       setReady(true);
       onReady?.();
+    }
+    if (msg.type === 'warm' && onWarm) {
+      onWarm({
+        done: Number(msg.done) || 0,
+        total: Number(msg.total) || 0,
+        failed: Number(msg.failed) || 0,
+        finished: !!msg.finished,
+        error: !!msg.error,
+      });
     }
     if (msg.type === 'tap' && onTap && typeof msg.lng === 'number' && typeof msg.lat === 'number') {
       onTap({ lng: msg.lng, lat: msg.lat, zoom: Number(msg.zoom) || 0, hits: Array.isArray(msg.hits) ? msg.hits : [] });

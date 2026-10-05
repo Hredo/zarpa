@@ -63,6 +63,21 @@ export type IconName =
   | 'sparkle'
   | 'eye'
   | 'calendar'
+  | 'mic'
+  | 'play'
+  | 'pause'
+  | 'stop'
+  | 'cloud'
+  | 'cloudSun'
+  | 'rain'
+  | 'snow'
+  | 'storm'
+  | 'fog'
+  | 'thermo'
+  | 'wind'
+  | 'trash'
+  | 'flag'
+  | 'download'
   | 'mamifero'
   | 'ave'
   | 'reptil'
@@ -382,6 +397,77 @@ function draw(name: IconName, s: Stroke, c: string) {
           <Path {...s} d="M3.5 10h17M8 3v4M16 3v4" />
         </>
       );
+    case 'mic':
+      return (
+        <>
+          <Rect {...s} x="9" y="3" width="6" height="11" rx="3" />
+          <Path {...s} d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+        </>
+      );
+    case 'play':
+      return <Path {...s} d="M8 5.5v13l11-6.5z" />;
+    case 'pause':
+      return (
+        <>
+          <Line {...s} x1="8.5" y1="5.5" x2="8.5" y2="18.5" />
+          <Line {...s} x1="15.5" y1="5.5" x2="15.5" y2="18.5" />
+        </>
+      );
+    case 'stop':
+      return <Rect {...s} x="6" y="6" width="12" height="12" rx="2.4" />;
+    case 'cloud':
+      return <Path {...s} d="M7 19a4.3 4.3 0 0 1-.6-8.55A6 6 0 0 1 17.9 9.6 4.7 4.7 0 0 1 17.3 19z" />;
+    case 'cloudSun':
+      return (
+        <>
+          <Circle {...s} cx="8.2" cy="8.2" r="3" />
+          <Path {...s} d="M8.2 2.6v1.3M2.6 8.2h1.3M4.2 4.2l.9.9M12.2 4.2l-.9.9" />
+          <Path {...s} d="M9.5 20.5a3.6 3.6 0 0 1-.4-7.2 4.7 4.7 0 0 1 9 1.2 3.1 3.1 0 0 1-.6 6z" />
+        </>
+      );
+    case 'rain':
+      return (
+        <>
+          <Path {...s} d="M7 14.5a4 4 0 0 1-.5-7.9 5.6 5.6 0 0 1 10.8 1.3 3.3 3.3 0 0 1-.8 6.6z" />
+          <Path {...s} d="M8.5 17.5l-1 2.8M12.5 17.5l-1 2.8M16.5 17.5l-1 2.8" />
+        </>
+      );
+    case 'snow':
+      return (
+        <>
+          <Path {...s} d="M7 14.5a4 4 0 0 1-.5-7.9 5.6 5.6 0 0 1 10.8 1.3 3.3 3.3 0 0 1-.8 6.6z" />
+          <Path {...s} d="M8.5 18h.01M12 20.2h.01M15.5 18h.01M12 17.6h.01" strokeWidth={s.strokeWidth + 1.2} />
+        </>
+      );
+    case 'storm':
+      return (
+        <>
+          <Path {...s} d="M7 14.5a4 4 0 0 1-.5-7.9 5.6 5.6 0 0 1 10.8 1.3 3.3 3.3 0 0 1-.8 6.6" />
+          <Path {...s} d="M12.8 12.5 10 17h3.2l-1.3 4.2" />
+        </>
+      );
+    case 'fog':
+      return (
+        <>
+          <Path {...s} d="M7 12.5a4 4 0 0 1-.5-7.9 5.6 5.6 0 0 1 10.8 1.3 3.3 3.3 0 0 1-.8 6.6z" />
+          <Path {...s} d="M4 16h16M6.5 19.5h11" />
+        </>
+      );
+    case 'thermo':
+      return (
+        <>
+          <Path {...s} d="M10 14.4V5.2a2 2 0 0 1 4 0v9.2a4 4 0 1 1-4 0z" />
+          <Line {...s} x1="12" y1="9" x2="12" y2="16" />
+        </>
+      );
+    case 'wind':
+      return <Path {...s} d="M3 9h10.5a2.5 2.5 0 1 0-2.5-2.5M3 14h14.5a2.5 2.5 0 1 1-2.5 2.5M3 11.5h6" />;
+    case 'trash':
+      return <Path {...s} d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12.5h9.4L17.5 7M10 10.5v6M14 10.5v6" />;
+    case 'flag':
+      return <Path {...s} d="M6 21V4M6 4.5h11.5l-2.8 4 2.8 4H6" />;
+    case 'download':
+      return <Path {...s} d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14" />;
     case 'mamifero':
       return (
         <G transform="translate(-0.4 0.4) scale(0.248)">

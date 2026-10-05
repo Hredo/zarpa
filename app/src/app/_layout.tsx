@@ -7,9 +7,13 @@ import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AccountSwitchSheet } from '@/components/AccountSwitchSheet';
 import { BootError } from '@/components/BootError';
+import { WelcomeGate } from '@/components/WelcomeGate';
 import { openDatabases } from '@/db';
+import { startAuth } from '@/store/auth';
 import { useJournal } from '@/store/journal';
+import { startSync } from '@/sync';
 import { usePalette } from '@/theme';
 import { fontAssets } from '@/theme/fonts';
 
@@ -26,6 +30,11 @@ export default function RootLayout() {
   useEffect(() => {
     openDatabases()
       .then(() => useJournal.getState().load())
+      .then(() => {
+        // La cuenta y la copia en la nube son opcionales: arrancan sin bloquear la app.
+        startAuth();
+        startSync();
+      })
       .then(() => setDbReady(true))
       .catch((e: unknown) => setDbError(e instanceof Error ? e : new Error(String(e))));
   }, []);
@@ -50,7 +59,10 @@ export default function RootLayout() {
           }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="especie/[id]" />
+          <Stack.Screen name="comparar" />
           <Stack.Screen name="avistamiento/[id]" />
+          <Stack.Screen name="excursion" />
+          <Stack.Screen name="calendario" />
           <Stack.Screen name="razas/[id]" />
           <Stack.Screen name="raza/[id]" />
           {/* El visor ocupa toda la pantalla y se cierra hacia abajo, como una
@@ -60,7 +72,14 @@ export default function RootLayout() {
               detents se comía el scroll al llegar al final de la lista. */}
           <Stack.Screen name="filtros" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', gestureEnabled: false }} />
           <Stack.Screen name="fuentes" />
+          <Stack.Screen name="logros" />
+          <Stack.Screen name="misiones" />
+          <Stack.Screen name="quiz" />
+          <Stack.Screen name="perfil" />
+          <Stack.Screen name="bienvenida" options={{ presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }} />
         </Stack>
+        <WelcomeGate />
+        <AccountSwitchSheet />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

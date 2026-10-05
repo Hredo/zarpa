@@ -70,26 +70,62 @@ export async function similarSpecies(taxonId: number): Promise<Fetched<Similar[]
   return { ...res, data: list };
 }
 
-export type Histogram = { months: number[]; hours: number[]; total: number; scope: 'cerca' | 'mundo' };
+export type Histogram = {
+  months: number[];
+  /** Observaciones por hora LOCAL del día (0–23) en una muestra al azar. */
+  hours: number[];
+  /** Tamaño de la muestra horaria (las que traen hora). */
+  hoursSample: number;
+  total: number;
+  scope: 'cerca' | 'mundo';
+};
+
+/** Muestra mínima para dibujar la actividad por horas sin engañar. */
+export const MIN_HOUR_SAMPLE = 30;
+
+/**
+ * Hora local de una marca de iNaturalist (`2023-07-19T19:22:00-06:00` → 19).
+ * La API devuelve `time_observed_at` con el desfase de donde se observó, así que
+ * las dos cifras tras la «T» ya son la hora local del observador.
+ */
+export function localHour(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const m = /T(\d{2}):/.exec(iso);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return h >= 0 && h < 24 ? h : null;
+}
 
 /**
  * Cuándo se ve: observaciones confirmadas por mes del año y por hora del día.
  * Con ubicación, en un radio de 300 km (el hemisferio cambia las estaciones);
  * sin ella, en todo el mundo, y la ficha lo dice.
+ *
+ * El histograma de iNaturalist no tiene «hora del día» (su intervalo `hour` es
+ * una serie temporal de las últimas horas), así que la actividad diaria sale de
+ * una muestra al azar de hasta 200 observaciones con su hora local.
  */
 export async function seasonality(taxonId: number, near?: { lat: number; lng: number }): Promise<Fetched<Histogram> | null> {
   const where = near ? `&lat=${near.lat.toFixed(2)}&lng=${near.lng.toFixed(2)}&radius=300` : '';
   const base = `https://api.inaturalist.org/v1/observations/histogram?taxon_id=${taxonId}&quality_grade=research&captive=false&date_field=observed${where}`;
+  const sample = `https://api.inaturalist.org/v2/observations?taxon_id=${taxonId}&quality_grade=research&captive=false${where}&per_page=200&order_by=random&fields=time_observed_at`;
   const key = `season:${taxonId}:${near ? `${near.lat.toFixed(1)},${near.lng.toFixed(1)}` : 'world'}`;
   const [m, h] = await Promise.all([
     cachedJson<{ results: { month_of_year: Record<string, number> } }>(`${key}:m`, `${base}&interval=month_of_year`, 30),
-    cachedJson<{ results: { hour: Record<string, number> } }>(`${key}:h`, `${base}&interval=hour`, 30),
+    cachedJson<{ results: { time_observed_at: string | null }[] }>(`${key}:hl`, sample, 30),
   ]);
   if (!m) return null;
   const months = Array.from({ length: 12 }, (_, i) => m.data.results.month_of_year[String(i + 1)] ?? 0);
-  const hours = Array.from({ length: 24 }, (_, i) => h?.data.results.hour[String(i)] ?? 0);
+  const hours = Array.from({ length: 24 }, () => 0);
+  let hoursSample = 0;
+  for (const r of h?.data.results ?? []) {
+    const hr = localHour(r.time_observed_at);
+    if (hr == null) continue;
+    hours[hr]++;
+    hoursSample++;
+  }
   const total = months.reduce((a, b) => a + b, 0);
-  return { data: { months, hours, total, scope: near ? 'cerca' : 'mundo' }, fetchedAt: m.fetchedAt, fromCache: m.fromCache };
+  return { data: { months, hours, hoursSample, total, scope: near ? 'cerca' : 'mundo' }, fetchedAt: m.fetchedAt, fromCache: m.fromCache };
 }
 
 /* --- GBIF ------------------------------------------------------------------- */

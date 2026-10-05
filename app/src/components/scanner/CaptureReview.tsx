@@ -15,6 +15,7 @@ import { displayName } from '@/lib/speciesName';
 import { discardCapture } from '@/lib/capture';
 import { fmt1 } from '@/lib/format';
 import { countryOf, placeName, type Coords } from '@/lib/location';
+import { fetchWeather, weatherToFields, type Weather } from '@/lib/weather';
 import { useJournal } from '@/store/journal';
 import { duration, ease, radius, space, type, usePalette } from '@/theme';
 
@@ -66,6 +67,8 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
   const [saving, setSaving] = useState(false);
   const [breed, setBreed] = useState<BreedRow | null>(null);
   const [cc, setCc] = useState<string | null>(null);
+  // Clima del momento (Open-Meteo). Se pide al abrir la revisión y nunca bloquea el guardado.
+  const [weather, setWeather] = useState<Weather | null>(null);
   const [guesses, setGuesses] = useState<{ species: number | null; top: BreedGuess[]; sure: number | null }>({
     species: null,
     top: [],
@@ -86,6 +89,17 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
 
   useEffect(() => {
     if (coords) countryOf(coords).then(setCc);
+  }, [coords]);
+
+  useEffect(() => {
+    if (!coords) return;
+    let alive = true;
+    fetchWeather(coords.lat, coords.lng).then((w) => {
+      if (alive) setWeather(w);
+    });
+    return () => {
+      alive = false;
+    };
   }, [coords]);
 
   const verdict: Verdict | null = capture.verdict;
@@ -156,7 +170,15 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
       verified,
       model: speciesModelId(),
       note: null,
+      ...(weather ? weatherToFields(weather) : {}),
     });
+    // Si el clima aún no ha llegado (sin red o lenta), se guarda igual y se
+    // completa en cuanto llegue, aunque ya estemos en la pantalla del cromo.
+    if (!weather && coords) {
+      fetchWeather(coords.lat, coords.lng).then((w) => {
+        if (w) void useJournal.getState().updateSighting(row.id, weatherToFields(w));
+      });
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     leave.set(withTiming(1, { duration: duration.emphasis, easing: ease.inOut }));
     setTimeout(

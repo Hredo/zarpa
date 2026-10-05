@@ -1,0 +1,127 @@
+rules_version = '2';
+
+/*
+ * Reglas de Firestore de Zarpa.
+ *
+ * Principio: todo está cerrado salvo lo que cada persona hace con lo suyo.
+ *   - Nadie lee ni escribe datos de otro usuario.
+ *   - Nada es público todavía. Lo social (perfiles públicos, seguir, tablones)
+ *     tiene su hueco al final de este fichero, cerrado con `if false`.
+ *   - El perfil lo crea y lo borra el servidor (functions/): el cliente solo
+ *     puede cambiar el alias y la foto. Los contadores los escribe una
+ *     función, así que no se pueden falsear.
+ *   - Los avistamientos son una copia de la tabla local `sighting`: los campos
+ *     conocidos se validan por tipo y tamaño, y se admiten hasta 40 campos para
+ *     que el cuaderno gane columnas (notas, clima, audio) sin tocar las reglas.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // Validadores de campo opcional: ausente o null también valen.
+    function optString(d, k, max) {
+      return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= max);
+    }
+    function optInt(d, k) {
+      return !(k in d) || d[k] == null || d[k] is int;
+    }
+    function optNumber(d, k, lo, hi) {
+      return !(k in d) || d[k] == null || (d[k] is number && d[k] >= lo && d[k] <= hi);
+    }
+    function optBool(d, k) {
+      return !(k in d) || d[k] == null || d[k] is bool;
+    }
+    function optIn(d, k, values) {
+      return !(k in d) || d[k] == null || d[k] in values;
+    }
+
+    // ---- Perfil ---------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      // Crear y borrar: solo el servidor (Admin SDK se salta las reglas).
+      allow create, delete: if false;
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['alias', 'photoURL', 'updatedAt'])
+        && request.resource.data.alias is string
+        && request.resource.data.alias.size() >= 1
+        && request.resource.data.alias.size() <= 40
+        && (request.resource.data.photoURL == null
+            || (request.resource.data.photoURL is string
+                && request.resource.data.photoURL.size() <= 1000
+                && request.resource.data.photoURL.matches('https://.*')))
+        && request.resource.data.updatedAt == request.time;
+
+      // Ajustes privados (idioma, modo niños, preferencias de sincronización...).
+      match /private/{doc} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && doc == 'settings'
+          && request.resource.data.keys().size() <= 20;
+        allow delete: if false;
+      }
+
+      // ---- Avistamientos (copia en la nube del cuaderno) -----------------
+      match /sightings/{id} {
+        function validSighting(d) {
+          return id.matches('[A-Za-z0-9_-]{1,64}')
+            && d.keys().size() <= 40
+            && d.created_at is string && d.created_at.size() >= 10 && d.created_at.size() <= 40
+            && d.method in ['ia', 'manual']
+            && d.verified in [0, 1]
+            && optInt(d, 'species_id')
+            && optString(d, 'breed_id', 64)
+            && optNumber(d, 'lat', -90, 90)
+            && optNumber(d, 'lng', -180, 180)
+            && optNumber(d, 'accuracy', 0, 1000000)
+            && optString(d, 'place', 300)
+            && optNumber(d, 'confidence', 0, 1)
+            && optString(d, 'candidates', 20000)
+            && optString(d, 'model', 120)
+            && optString(d, 'note', 5000)
+            && d.has_photo is bool
+            // Pegatina y nota de voz (sus ficheros están en Storage).
+            && optBool(d, 'has_sticker')
+            && optBool(d, 'has_voice')
+            && optIn(d, 'sticker_ext', ['png', 'jpg'])
+            && optIn(d, 'voice_ext', ['m4a', 'aac', 'mp4', 'caf', '3gp'])
+            && optNumber(d, 'voice_ms', 0, 3600000)
+            // Diario de campo: clima de Open-Meteo y momento del día.
+            && optNumber(d, 'weather_code', 0, 99)
+            && optNumber(d, 'weather_temp', -90, 70)
+            && optNumber(d, 'weather_feels', -100, 80)
+            && optNumber(d, 'weather_humidity', 0, 100)
+            && optNumber(d, 'weather_wind', 0, 500)
+            && optIn(d, 'weather_is_day', [0, 1])
+            && optString(d, 'weather_at', 40)
+            && optIn(d, 'day_phase', ['amanecer', 'manana', 'mediodia', 'tarde', 'atardecer', 'noche'])
+            && optString(d, 'updated_at', 40)
+            && optNumber(d, 'schema', 1, 1000);
+        }
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validSighting(request.resource.data);
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    // ---- Preparado para lo social, CERRADO -------------------------------
+    // Cuando llegue lo social: `publicProfiles/{uid}` (alias, avatar, contadores
+    // que una función copia desde users/{uid}) con lectura para usuarios
+    // autenticados, y `follows/{follower}_{followed}`. Hasta entonces, nada.
+    match /publicProfiles/{uid} {
+      allow read, write: if false;
+    }
+    match /follows/{edge} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

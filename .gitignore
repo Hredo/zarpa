@@ -53,3 +53,9 @@ app/assets/models/
 
 # Ajustes locales de Claude Code de la plantilla
 app/.claude/
+
+# Firebase
+.firebase/
+functions/lib/
+functions/node_modules/
+*-debug.log

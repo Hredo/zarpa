@@ -12,9 +12,11 @@
       "bundleIdentifier": "com.hrval.zarpa",
       "deploymentTarget": "17.0",
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Zarpa usa la cámara para reconocer en directo al animal que tienes delante y convertir tu foto en su pegatina. Las fotos se quedan en tu móvil.",
         "NSLocationWhenInUseUsageDescription": "Zarpa usa tu ubicación para saber qué especies viven donde estás (mejora el reconocimiento) y para apuntar dónde viste cada animal.",
+        "NSMicrophoneUsageDescription": "Zarpa usa el micrófono solo cuando pulsas «Grabar» para guardar una nota de voz en un avistamiento. Las grabaciones se quedan en tu móvil.",
         "NSMotionUsageDescription": "Zarpa usa la inclinación del móvil para el brillo de los cromos raros.",
         "CADisableMinimumFrameDurationOnPhone": true
       }
@@ -22,9 +24,8 @@
     "android": {
       "package": "com.hrval.zarpa",
       "versionCode": 1,
-      "permissions": ["android.permission.CAMERA", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION"],
+      "permissions": ["android.permission.CAMERA", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION", "android.permission.RECORD_AUDIO"],
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -52,6 +53,9 @@
       "expo-sqlite",
       "expo-asset",
       "expo-sharing",
+      "expo-apple-authentication",
+      ["@react-native-google-signin/google-signin", { "iosUrlScheme": "com.googleusercontent.apps.REEMPLAZAR-POR-EL-ID-DE-CLIENTE-IOS" }],
+      ["expo-audio", { "microphonePermission": "Zarpa usa el micrófono solo cuando pulsas «Grabar» para guardar una nota de voz en un avistamiento. Las grabaciones se quedan en tu móvil.", "recordAudioAndroid": true, "enableBackgroundPlayback": false }],
       [
         "expo-location",
         {

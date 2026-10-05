@@ -4,13 +4,15 @@ import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Chip } from '@/components/Chip';
 import { Icon, type IconName } from '@/components/Icon';
-import { MapCanvas, type MapCanvasHandle, type MapTap } from '@/components/MapCanvas';
+import { MapCanvas, type HeatData, type MapCanvasHandle, type MapTap } from '@/components/MapCanvas';
 import { Press } from '@/components/Press';
 import { Txt } from '@/components/Txt';
 import { getAtlasSpecies, type AtlasSpecies } from '@/db/catalog';
 import { fmtInt } from '@/lib/format';
 import type { GroupCode } from '@/lib/groups';
+import { unexploredCells } from '@/lib/heat';
 import { useLastLocation } from '@/lib/location';
 import { naturalAreasWithSpecies, tooLarge, type NaturalAreas } from '@/lib/naturalAreas';
 import { placesInBox, type PlaceCount } from '@/lib/remote';
@@ -55,6 +57,8 @@ export default function Atlas() {
   const [places, setPlaces] = useState<PlaceInfo[] | null>(null);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  /** Capa personal «Mis avistamientos»: mapa de calor y zonas sin explorar. */
+  const [mine, setMine] = useState(false);
   /** Especie que se está mirando de pasada desde su ficha: efímera, nunca se guarda sola. */
   const [preview, setPreview] = useState<AtlasSpecies | null>(null);
 
@@ -128,6 +132,16 @@ export default function Atlas() {
     [sightings],
   );
 
+  const heat = useMemo<HeatData>(() => {
+    const pts = sightings.filter((s) => s.lat != null && s.lng != null).map((s) => ({ lat: s.lat as number, lng: s.lng as number }));
+    const center = near ?? pts[0] ?? null;
+    return {
+      visible: mine,
+      points: pts.map((p) => [p.lng, p.lat] as [number, number]),
+      cells: mine && center ? unexploredCells(center, pts) : [],
+    };
+  }, [sightings, near, mine]);
+
   const onTap = async (t: MapTap) => {
     setTap(t);
     const candidates = previewLayerOnly ? [...species, previewLayerOnly] : species;
@@ -158,7 +172,7 @@ export default function Atlas() {
       return next;
     });
 
-  const showLegend = !tap && (layers.length > 0 || pins.length > 0);
+  const showLegend = !tap && (layers.length > 0 || pins.length > 0 || mine);
   const previewGroup = preview ? groupColor(preview.grp) : null;
   const previewName = preview ? displayName(preview) : null;
 
@@ -169,6 +183,7 @@ export default function Atlas() {
         dark={false}
         layers={layers}
         pins={pins}
+        heat={heat}
         onTap={onTap}
         onReady={() => setMapReady(true)}
         initial={near ? { lng: near.lng, lat: near.lat, zoom: 7 } : undefined}
@@ -187,6 +202,16 @@ export default function Atlas() {
               <Icon name="globe" size={22} color={palette.sky} />
             </Press>
           </View>
+        </View>
+
+        <View style={styles.mineRow}>
+          <Chip
+            label="Mis avistamientos"
+            icon="layers"
+            selected={mine}
+            onPress={() => setMine((v) => !v)}
+            accessibilityLabel={mine ? 'Ocultar el mapa de calor de mis avistamientos' : 'Mostrar el mapa de calor de mis avistamientos y las zonas sin explorar'}
+          />
         </View>
 
         {species.length > 0 ? (
@@ -306,6 +331,22 @@ export default function Atlas() {
               Pocas a muchas observaciones
             </Txt>
           </View>
+          {mine ? (
+            <>
+              <View style={styles.legendRow}>
+                <View style={[styles.pinDot, { backgroundColor: palette.brand, borderColor: palette.brandInk }]} />
+                <Txt variant="small" tone="soft">
+                  {pins.length > 0 ? 'Más calor, más avistamientos tuyos' : 'Aún no has fichado nada con ubicación'}
+                </Txt>
+              </View>
+              <View style={styles.legendRow}>
+                <View style={[styles.pinDot, { backgroundColor: palette.skyTint, borderColor: palette.sky, borderStyle: 'dashed' }]} />
+                <Txt variant="small" tone="soft">
+                  Zonas de 2,5 km sin avistamientos tuyos
+                </Txt>
+              </View>
+            </>
+          ) : null}
           {pins.length > 0 ? (
             <View style={styles.legendRow}>
               <View style={[styles.pinDot, { backgroundColor: palette.brand, borderColor: palette.ink }]} />
@@ -397,6 +438,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   natural: { marginTop: space.xs, gap: 2 },
   header: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: space.lg, paddingBottom: space.md, borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl },
+  mineRow: { flexDirection: 'row', paddingTop: space.md },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerBtns: { flexDirection: 'row', gap: space.sm },
   iconBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },

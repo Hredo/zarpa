@@ -36,7 +36,7 @@ describe('razas', () => {
   it('encuentra el pastor alemán por su nombre oficial en español (FCI 166)', () => {
     const rows = breeds(null, { q: 'pastor aleman' });
     const gsd = rows.find((r) => r.id === 'fci:166');
-    expect(gsd?.name).toBe('PASTOR ALEMÁN');
+    expect(gsd?.name).toBe('Pastor Alemán');
     expect(gsd?.origin_cc).toBe('DE');
   });
 

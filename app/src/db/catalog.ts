@@ -249,3 +249,43 @@ export async function getCities(ids: number[]): Promise<City[]> {
   const byId = new Map(rows.map((r) => [r.id, r]));
   return ids.map((i) => byId.get(i)).filter((c): c is City => !!c);
 }
+
+export type SizeInfo = {
+  mass_g: number | null;
+  length_mm: number | null;
+  /** Qué longitud es: «longitud total», «del hocico a la cloaca»… (de provenance). */
+  length_kind: string | null;
+};
+
+const LENGTH_KIND: Record<string, string> = {
+  TL: 'longitud total',
+  SVL: 'del hocico a la cloaca',
+  SCL: 'del caparazón',
+};
+
+/**
+ * Tamaño verificado (etapa `size` de tools/). Si el catálogo es anterior a
+ * `mass_g` / `length_mm`, la consulta falla y se devuelve null: la ficha no
+ * muestra el bloque (nunca se inventa un tamaño).
+ */
+export async function getSize(id: number): Promise<SizeInfo | null> {
+  try {
+    const row = await catalog().getFirstAsync<{ mass_g: number | null; length_mm: number | null }>(
+      'SELECT mass_g, length_mm FROM species WHERE id = ?',
+      [id],
+    );
+    if (!row || (row.mass_g == null && row.length_mm == null)) return null;
+    let kind: string | null = null;
+    if (row.length_mm != null) {
+      const p = await catalog().getFirstAsync<{ note: string | null }>(
+        "SELECT note FROM provenance WHERE id = ? AND field = 'length_mm'",
+        [id],
+      );
+      const code = p?.note?.split(':')[0]?.trim();
+      kind = (code && LENGTH_KIND[code]) || null;
+    }
+    return { mass_g: row.mass_g, length_mm: row.length_mm, length_kind: kind };
+  } catch {
+    return null;
+  }
+}

@@ -5,16 +5,21 @@ import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/Card';
+import { CalendarCard } from '@/components/cards/CalendarCard';
+import { ExcursionCard } from '@/components/cards/ExcursionCard';
 import { Cromo, listThumb } from '@/components/Cromo';
 import { GroupPill } from '@/components/GroupPill';
 import { GroupTile } from '@/components/GroupTile';
+import { HomeAvatar } from '@/components/HomeAvatar';
 import { Icon } from '@/components/Icon';
 import { Logo } from '@/components/Logo';
 import { Meter } from '@/components/Meter';
+import { MissionsCard } from '@/components/MissionsCard';
 import { Appear } from '@/components/motion/Appear';
 import { AnimatedNumber } from '@/components/motion/AnimatedNumber';
 import { FadeImage } from '@/components/motion/FadeImage';
 import { Press } from '@/components/Press';
+import { QuizCard } from '@/components/QuizCard';
 import { Section } from '@/components/Section';
 import { StatTile } from '@/components/StatTile';
 import { TrailMark } from '@/components/TrailMark';
@@ -159,6 +164,8 @@ export default function Inicio() {
       <Appear from="none">
         <View style={styles.head}>
           <Logo variant="full" size={36} />
+          <View style={styles.flex} />
+          <HomeAvatar />
         </View>
         <Txt variant="heading" style={styles.hello}>
           {greeting()}
@@ -239,6 +246,16 @@ export default function Inicio() {
       ) : null}
 
       <Appear index={3}>
+        <Section title="Para hoy" icon="calendar" accent={palette.leaf} tint={palette.leafTint}>
+          <View style={styles.stack}>
+            <QuizCard />
+            <ExcursionCard />
+            <CalendarCard />
+          </View>
+        </Section>
+      </Appear>
+
+      <Appear index={4}>
         <Section title="Cerca de ti" icon="pin" accent={palette.sky} tint={palette.skyTint}>
           {nearbyState === 'noperm' ? (
             <Card tone="tint" tint={palette.skyTint}>
@@ -294,7 +311,7 @@ export default function Inicio() {
         ) : null}
       </Appear>
 
-      <Appear index={4}>
+      <Appear index={5}>
         <Section title="Tu progreso" icon="star" accent={palette.brandInk} tint={palette.sunTint}>
           <Card>
             <View style={styles.progressTop}>
@@ -324,7 +341,13 @@ export default function Inicio() {
         </Section>
       </Appear>
 
-      <Appear index={5}>
+      <Appear index={6}>
+        <Section title="Retos" icon="flag" accent={palette.brandInk} tint={palette.brandTint}>
+          <MissionsCard />
+        </Section>
+      </Appear>
+
+      <Appear index={7}>
         <Section title="Explora por grupos" icon="bestiario" accent={palette.ink} tint={palette.strongTint}>
           <View style={styles.grid}>
             {GROUPS.filter((g) => (totals[g.code] ?? 0) > 0)
@@ -341,7 +364,7 @@ export default function Inicio() {
       </Appear>
 
       {recent.length > 0 ? (
-        <Appear index={6}>
+        <Appear index={8}>
           <Section title="Tus últimas pegatinas" icon="cuaderno" accent={palette.brandInk} tint={palette.brandTint}>
             <View style={styles.bleed}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
@@ -380,6 +403,7 @@ export default function Inicio() {
 }
 
 const styles = StyleSheet.create({
+  stack: { gap: space.md },
   head: { flexDirection: 'row', alignItems: 'center', marginBottom: space.lg },
   hello: { marginBottom: space.xs },
   block: { marginTop: space.xl },

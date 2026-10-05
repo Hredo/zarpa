@@ -7,6 +7,8 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withDelay
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/Card';
+import { DiarySection } from '@/components/diario/DiarySection';
+import { ShareCromoButton } from '@/components/ficha/ShareCromoButton';
 import { GroupPill } from '@/components/GroupPill';
 import { HoloSticker } from '@/components/HoloSticker';
 import { Icon } from '@/components/Icon';
@@ -116,7 +118,7 @@ export default function Avistamiento() {
 
   return (
     <View style={[styles.fill, { backgroundColor: palette.bg }]}>
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + space.sm, paddingBottom: insets.bottom + space.xxxl }}>
+      <ScrollView keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets contentContainerStyle={{ paddingTop: insets.top + space.sm, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={styles.topBar}>
           <Press onPress={() => (nuevo ? router.replace('/cuaderno') : router.back())} accessibilityLabel="Volver" style={[styles.round, { backgroundColor: palette.surface }]}>
             <Icon name={nuevo ? 'close' : 'back'} />
@@ -197,6 +199,8 @@ export default function Avistamiento() {
             />
           </Card>
 
+          <DiarySection sighting={s} onPatch={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))} />
+
           <Txt variant="subheading" style={{ marginTop: space.xl, marginBottom: space.sm }}>
             Foto original
           </Txt>
@@ -211,6 +215,16 @@ export default function Avistamiento() {
                   Ver la ficha de la especie
                 </Txt>
               </Press>
+            )}
+            {sp && (
+              <ShareCromoButton
+                species={sp}
+                tone="solid"
+                label="Compartir el cromo"
+                ownPhoto={{ uri: s.sticker ?? s.photo, sticker: !!s.sticker?.endsWith('.png') }}
+                dateText={`Avistada el ${fmtDate(s.created_at)}`}
+                placeText={s.place}
+              />
             )}
             <Press onPress={remove} accessibilityLabel="Despegar esta pegatina del cuaderno" style={[styles.danger, { borderColor: palette.danger }]}>
               <Icon name="close" size={18} color={palette.danger} />
