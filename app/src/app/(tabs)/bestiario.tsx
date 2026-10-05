@@ -1,7 +1,7 @@
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import { Animated, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BreedLine } from '@/components/BreedLine';
@@ -36,6 +36,12 @@ const SORT_LABEL: Record<SortKey, string> = {
  * recuento de los activos. La rejilla de cromos entra escalonada solo la
  * primera vez que se ve (las celdas de FlashList se reciclan: no se anima en
  * cada scroll ni al filtrar, que se hace decenas de veces).
+ *
+ * El buscador, los filtros y los grupos van fijos arriba: la cabecera está
+ * fuera de la lista y, al bajar, solo se va el título (sube con la rejilla y se
+ * desvanece). Así nunca hay que volver arriba para buscar otra cosa. El campo
+ * de texto no se desmonta nunca, así que el teclado no se cierra al hacer scroll
+ * mientras se escribe.
  */
 export default function Bestiario() {
   const palette = usePalette();
@@ -46,6 +52,9 @@ export default function Bestiario() {
   const { rows, total, loadMore } = useSpeciesList(filters, sort);
   const [totals, setTotals] = useState<Record<string, number>>({});
   const [focused, setFocused] = useState(false);
+  const [scrollY] = useState(() => new Animated.Value(0));
+  const [titleH, setTitleH] = useState(72);
+  const [headerH, setHeaderH] = useState(insets.top + 236);
 
   useEffect(() => {
     groupTotals().then((g) => setTotals(Object.fromEntries(g.map((x) => [x.code, x.total]))));
@@ -80,9 +89,18 @@ export default function Bestiario() {
   const selected = filters.groups.length === 1 ? filters.groups[0] : null;
   const selectedLabel = selected ? GROUPS.find((g) => g.code === selected)?.label : null;
 
-  const header = (
-    <View style={{ paddingTop: insets.top + space.md }}>
-      <View style={[styles.titleRow, { paddingHorizontal: GUTTER }]}>
+  // Solo el título se va al bajar: sube a la par que la rejilla y se desvanece.
+  const lift = scrollY.interpolate({ inputRange: [0, titleH], outputRange: [0, -titleH], extrapolate: 'clamp' });
+  const titleFade = scrollY.interpolate({ inputRange: [0, titleH * 0.6], outputRange: [1, 0], extrapolate: 'clamp' });
+  const onScroll = Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false });
+
+  const fixedHeader = (
+    <Animated.View
+      onLayout={(e) => setHeaderH(Math.round(e.nativeEvent.layout.height))}
+      style={[styles.fixed, { paddingTop: insets.top + space.md, backgroundColor: palette.bg, borderBottomColor: palette.line, transform: [{ translateY: lift }] }]}>
+      <Animated.View
+        onLayout={(e) => setTitleH(Math.round(e.nativeEvent.layout.height))}
+        style={[styles.titleRow, { paddingHorizontal: GUTTER, opacity: titleFade }]}>
         <View style={styles.flex}>
           <Txt variant="title">Bestiario</Txt>
           <Txt variant="body" tone="soft">
@@ -97,7 +115,7 @@ export default function Bestiario() {
             {caught.size === 1 ? 'avistada' : 'avistadas'}
           </Txt>
         </View>
-      </View>
+      </Animated.View>
 
       <View style={[styles.searchRow, { paddingHorizontal: GUTTER }]}>
         <View
@@ -165,7 +183,11 @@ export default function Bestiario() {
           />
         ))}
       </ScrollView>
+    </Animated.View>
+  );
 
+  const header = (
+    <View style={{ paddingTop: headerH }}>
       {shownBreeds.length > 0 && (
         <View style={[styles.breeds, { paddingHorizontal: GUTTER }]}>
           <Txt variant="subheading">Razas</Txt>
@@ -202,6 +224,8 @@ export default function Bestiario() {
         numColumns={columns}
         keyExtractor={(item: SpeciesRow) => String(item.id)}
         ListHeaderComponent={header}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: space.xxxl }}
         renderItem={({ item, index }) => (
           // Sin animación de entrada: las celdas de FlashList se reciclan en cada scroll.
@@ -250,6 +274,7 @@ export default function Bestiario() {
           ) : null
         }
       />
+      {fixedHeader}
     </View>
   );
 }
@@ -257,9 +282,10 @@ export default function Bestiario() {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   flex: { flex: 1 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md },
+  fixed: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, borderBottomWidth: StyleSheet.hairlineWidth },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md, paddingBottom: space.lg },
   tally: { alignItems: 'center', paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.lg, minWidth: 72 },
-  searchRow: { flexDirection: 'row', gap: space.sm, marginTop: space.lg, alignItems: 'center' },
+  searchRow: { flexDirection: 'row', gap: space.sm, alignItems: 'center' },
   search: {
     flex: 1,
     flexDirection: 'row',
@@ -285,10 +311,10 @@ const styles = StyleSheet.create({
   },
   badge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
   badgeText: { fontSize: 12, lineHeight: 15 },
-  albums: { gap: space.sm, paddingVertical: space.lg },
-  resultRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: HIT, paddingBottom: space.xs },
+  albums: { gap: space.sm, paddingTop: space.md, paddingBottom: space.md },
+  resultRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: HIT, paddingTop: space.xs, paddingBottom: space.xs },
   sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: HIT, paddingLeft: space.sm },
-  breeds: { paddingBottom: space.sm, gap: space.xs },
+  breeds: { paddingTop: space.md, paddingBottom: space.sm, gap: space.xs },
   breedOf: { marginTop: -space.sm, marginBottom: space.xs, marginLeft: 56 + space.md },
   empty: { borderWidth: 1, borderRadius: radius.lg, padding: space.xl, gap: space.md, alignItems: 'flex-start' },
   emptyIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
