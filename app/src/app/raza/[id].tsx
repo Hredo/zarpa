@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
@@ -6,14 +5,20 @@ import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { countryNames } from '@/components/BreedLine';
-import { Icon } from '@/components/Icon';
+import { Card } from '@/components/Card';
+import { flagOf } from '@/components/ficha/flags';
+import { Tag } from '@/components/ficha/Tag';
+import { Icon, type IconName } from '@/components/Icon';
+import { Appear } from '@/components/motion/Appear';
+import { FadeImage } from '@/components/motion/FadeImage';
 import { Press } from '@/components/Press';
 import { Txt } from '@/components/Txt';
 import { getBreed, getSpecies, type Breed } from '@/db/catalog';
 import { fmtDate } from '@/lib/format';
+import { displayName } from '@/lib/speciesName';
 import { AUTHORITY_LABEL } from '@/lib/groups';
 import { expandUrl } from '@/lib/urls';
-import { radius, space, usePalette } from '@/theme';
+import { elevation, groupColor, radius, space, usePalette } from '@/theme';
 
 const AUTHORITY_NAME: Record<string, string> = {
   fci: 'Federación Cinológica Internacional (FCI)',
@@ -30,13 +35,15 @@ export default function Raza() {
   const { width } = useWindowDimensions();
   const [breed, setBreed] = useState<Breed | null | undefined>(undefined);
   const [speciesName, setSpeciesName] = useState<string | null>(null);
+  const [grp, setGrp] = useState<string | null>(null);
 
   useEffect(() => {
     getBreed(id).then(async (b) => {
       setBreed(b);
       if (b) {
         const sp = await getSpecies(b.species_id);
-        setSpeciesName(sp ? (sp.name_es ?? sp.sci) : null);
+        setSpeciesName(sp ? displayName(sp).name : null);
+        setGrp(sp?.grp ?? null);
       }
     });
   }, [id]);
@@ -53,10 +60,15 @@ export default function Raza() {
     );
   }
 
-  const imgH = breed.img ? Math.round(width / Math.min(1.6, Math.max(0.75, breed.img_ratio ?? 1.33))) : 0;
+  const g = groupColor(grp);
+  const groupIcon: IconName = grp ? (grp as IconName) : 'heart';
+  const photoW = width - space.lg * 2 - 12;
+  const ratio = Math.min(1.6, Math.max(0.75, breed.img_ratio ?? 1.33));
+  const photoH = Math.min(Math.round(photoW / ratio), 340);
   const others = (breed.names_other ?? '').split('|').filter(Boolean);
   const varieties = (breed.varieties ?? '').split('|').filter(Boolean);
   const origin = countryNames(breed.origin_cc, 6);
+  const originFlags = (breed.origin_cc ?? '').split(',').filter(Boolean).slice(0, 6).map(flagOf).filter(Boolean);
   const facts: [string, string | null][] = [
     ['Grupo', breed.authority === 'fci' ? breed.grp : null],
     ['Sección', breed.section],
@@ -72,84 +84,107 @@ export default function Raza() {
     ['Adaptación', breed.adapt],
     ['Estado de riesgo', breed.risk],
   ];
+  const shown = facts.filter(([, v]) => v) as [string, string][];
 
   return (
     <View style={[styles.fill, { backgroundColor: palette.bg }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xxxl }}>
-        {breed.img ? (
-          <>
-            <Image source={expandUrl(breed.img)} style={{ width, height: imgH }} contentFit="cover" transition={200} accessibilityLabel={`Fotografía de ${breed.name}`} />
-            <Press
-              onPress={() => breed.img_page && WebBrowser.openBrowserAsync(expandUrl(breed.img_page)!)}
-              style={[styles.credit, { borderBottomColor: palette.line }]}>
-              <Txt variant="small" tone="faint" numberOfLines={2}>
-                Foto: {breed.img_author ?? 'autor sin indicar'} · {breed.img_license ?? 'licencia libre'} · Wikimedia Commons
+        <View style={[styles.hero, { backgroundColor: g.tint, paddingTop: insets.top + space.sm }]}>
+          <Press onPress={() => router.back()} accessibilityLabel="Volver" style={[styles.round, { backgroundColor: palette.surface }, elevation.card]}>
+            <Icon name="back" size={22} color={palette.ink} />
+          </Press>
+          {breed.img ? (
+            <Appear from="scale" style={[styles.photoWrap, { borderColor: palette.surface }, elevation.raised]}>
+              <FadeImage
+                source={expandUrl(breed.img)}
+                style={{ width: photoW, height: photoH, borderRadius: radius.md }}
+                contentFit="cover"
+                placeholderColor={palette.surface}
+                accessibilityLabel={`Fotografía de ${breed.name}`}
+              />
+            </Appear>
+          ) : (
+            <View style={styles.noPhoto}>
+              <Icon name={groupIcon} size={72} color={g.color} strokeWidth={1.3} />
+            </View>
+          )}
+          {breed.img ? (
+            <Press onPress={() => breed.img_page && WebBrowser.openBrowserAsync(expandUrl(breed.img_page)!)} style={styles.credit}>
+              <Icon name="camera" size={14} color={palette.inkFaint} />
+              <Txt variant="small" tone="faint" numberOfLines={2} style={styles.flex}>
+                {breed.img_author ?? 'Autor sin indicar'} · {breed.img_license ?? 'licencia libre'} · Wikimedia Commons
               </Txt>
             </Press>
-          </>
-        ) : null}
-        <View style={[styles.topBar, { top: (breed.img ? 0 : insets.top) + space.sm }]}>
-          <Press onPress={() => router.back()} accessibilityLabel="Volver" style={[styles.round, { backgroundColor: breed.img ? 'rgba(8,14,10,0.55)' : palette.surfaceAlt }]}>
-            <Icon name="back" size={22} color={breed.img ? '#FFFFFF' : palette.ink} />
-          </Press>
+          ) : null}
         </View>
 
-        <View style={[styles.content, !breed.img && { paddingTop: insets.top + 64 }]}>
-          <Txt variant="data" tone="faint">
-            {AUTHORITY_LABEL[breed.authority]}
-            {speciesName ? ` · ${speciesName}` : ''}
-          </Txt>
-          <Txt variant={breed.name.length > 24 ? 'title' : 'hero'} upper style={styles.name}>
-            {breed.name}
-          </Txt>
-          {breed.name_official && breed.name_official.toLowerCase() !== breed.name.toLowerCase() ? (
-            <Txt variant="body" tone="soft">
-              Nombre oficial: {breed.name_official}
+        <View style={styles.content}>
+          <Appear>
+            <View style={styles.tags}>
+              <Tag label={AUTHORITY_LABEL[breed.authority]} icon="check" color={g.color} tint={g.tint} ink={g.ink} />
+              {speciesName ? <Tag label={speciesName} icon={grp ? groupIcon : undefined} color={g.color} tint={g.tint} ink={g.ink} /> : null}
+            </View>
+            <Txt variant={breed.name.length > 24 ? 'title' : 'hero'} upper style={styles.name}>
+              {breed.name}
             </Txt>
-          ) : null}
-          {others.length > 0 ? (
-            <Txt variant="small" tone="faint" style={styles.others}>
-              También: {others.slice(0, 12).join(' · ')}
-            </Txt>
-          ) : null}
+            {originFlags.length > 0 ? (
+              <Txt variant="title" style={styles.flags}>
+                {originFlags.join(' ')}
+              </Txt>
+            ) : null}
+            {breed.name_official && breed.name_official.toLowerCase() !== breed.name.toLowerCase() ? (
+              <Txt variant="body" tone="soft">
+                Nombre oficial: {breed.name_official}
+              </Txt>
+            ) : null}
+            {others.length > 0 ? (
+              <Txt variant="small" tone="faint" style={styles.others}>
+                También: {others.slice(0, 12).join(' · ')}
+              </Txt>
+            ) : null}
+          </Appear>
 
-          <View style={styles.facts}>
-            {facts
-              .filter(([, v]) => v)
-              .map(([label, value]) => (
-                <View key={label} style={[styles.fact, { borderBottomColor: palette.line }]}>
-                  <Txt variant="label" tone="soft" style={styles.factLabel}>
-                    {label}
-                  </Txt>
-                  <Txt variant="body" style={styles.factValue}>
-                    {value}
-                  </Txt>
-                </View>
-              ))}
-          </View>
+          {shown.length > 0 ? (
+            <Appear index={1}>
+              <Card style={styles.facts}>
+                {shown.map(([label, value], i) => (
+                  <View key={label} style={[styles.fact, i > 0 && { borderTopColor: palette.line, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <Txt variant="label" tone="soft" style={styles.factLabel}>
+                      {label}
+                    </Txt>
+                    <Txt variant="body" style={styles.flex}>
+                      {value}
+                    </Txt>
+                  </View>
+                ))}
+              </Card>
+            </Appear>
+          ) : null}
 
           {varieties.length > 0 ? (
-            <View style={styles.block}>
-              <Txt variant="subheading">Variedades reconocidas</Txt>
-              {varieties.map((v) => (
-                <Txt key={v} variant="body">
-                  {v}
-                </Txt>
-              ))}
-            </View>
+            <Appear index={2}>
+              <View style={styles.block}>
+                <Txt variant="heading">Variedades reconocidas</Txt>
+                <View style={styles.tags}>
+                  {varieties.map((v) => (
+                    <Tag key={v} label={v} tint={g.tint} ink={g.ink} />
+                  ))}
+                </View>
+              </View>
+            </Appear>
           ) : null}
 
           <View style={styles.actions}>
-            <Press
-              onPress={() => WebBrowser.openBrowserAsync(breed.url)}
-              style={[styles.action, { borderColor: palette.ink }]}>
-              <Icon name="external" size={18} color={palette.ink} />
-              <Txt variant="label">Ver en la fuente oficial</Txt>
+            <Press onPress={() => WebBrowser.openBrowserAsync(breed.url)} style={[styles.action, { backgroundColor: palette.strong }]}>
+              <Icon name="external" size={18} color={palette.onStrong} />
+              <Txt variant="label" tone="onStrong">
+                Ver en la fuente oficial
+              </Txt>
             </Press>
             {breed.standard_url ? (
               <Press
                 onPress={() => WebBrowser.openBrowserAsync(breed.standard_url!)}
-                style={[styles.action, { borderColor: palette.ink }]}>
+                style={[styles.action, { borderColor: palette.ink, borderWidth: 1.5 }]}>
                 <Icon name="external" size={18} color={palette.ink} />
                 <Txt variant="label">Estándar oficial (PDF)</Txt>
               </Press>
@@ -169,20 +204,24 @@ export default function Raza() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  flex: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   textBtn: { paddingVertical: space.md },
-  credit: { paddingHorizontal: space.lg, paddingVertical: space.sm, borderBottomWidth: StyleSheet.hairlineWidth },
-  topBar: { position: 'absolute', left: space.lg },
-  round: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  hero: { paddingHorizontal: space.lg, paddingBottom: space.lg, borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl, gap: space.md },
+  round: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  photoWrap: { borderRadius: radius.lg, alignSelf: 'center', borderWidth: 6 },
+  noPhoto: { alignItems: 'center', paddingVertical: space.xl },
+  credit: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40 },
   content: { paddingHorizontal: space.lg, paddingTop: space.lg },
-  name: { marginTop: space.xs },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  name: { marginTop: space.md },
+  flags: { marginTop: space.xs },
   others: { marginTop: space.xs },
-  facts: { marginTop: space.xl },
-  fact: { flexDirection: 'row', gap: space.md, paddingVertical: space.md, borderBottomWidth: StyleSheet.hairlineWidth },
-  factLabel: { width: 128 },
-  factValue: { flex: 1 },
-  block: { marginTop: space.xl, gap: space.xs },
+  facts: { marginTop: space.xl, paddingVertical: space.xs },
+  fact: { flexDirection: 'row', gap: space.md, paddingVertical: space.md },
+  factLabel: { width: 120 },
+  block: { marginTop: space.xl, gap: space.md },
   actions: { marginTop: space.xl, gap: space.sm },
-  action: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: space.lg, borderRadius: radius.pill, borderWidth: 1.5 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'flex-start', minHeight: 48, paddingHorizontal: space.lg, borderRadius: radius.pill },
   source: { marginTop: space.xl },
 });

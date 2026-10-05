@@ -7,19 +7,26 @@ import { duration, ease, PRESS_SCALE } from '@/theme';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-type Props = Omit<PressableProps, 'style' | 'children'> & {
+export type PressProps = Omit<PressableProps, 'style' | 'children'> & {
   style?: StyleProp<ViewStyle>;
   children: ReactNode;
   /** Vibración ligera al confirmar; solo para acciones con consecuencia. */
   haptic?: boolean;
+  /** Escala al apoyar el dedo (0,97 por defecto; 1 = sin escala). */
   scaleTo?: number;
 };
 
 /**
- * Todo lo que se toca responde al apoyar el dedo, no al levantarlo: escala a
- * 0,97 en 120 ms con curva de salida. Sin muelles (no rebota al soltar).
+ * Primitiva de pulsación. Todo lo que se toca responde al apoyar el dedo, no
+ * al levantarlo: escala a 0,97 en 120 ms con curva de salida y vuelve igual,
+ * sin muelle (no rebota). Con «reducir movimiento» no escala.
+ *
+ * API: `<Press onPress={…} haptic style={…}>…</Press>` + cualquier prop de
+ * Pressable. Desactivado (`disabled`) baja a opacidad 0,45.
+ * Área táctil: añade `hitSlop` 6 por defecto; el visual debe medir ≥ 44 pt o
+ * ampliar `hitSlop`.
  */
-export function Press({ style, children, haptic, scaleTo = PRESS_SCALE, onPressIn, onPressOut, onPress, ...rest }: Props) {
+export function Press({ style, children, haptic, scaleTo = PRESS_SCALE, onPressIn, onPressOut, onPress, disabled, ...rest }: PressProps) {
   const scale = useSharedValue(1);
   const reduced = useReducedMotion();
   const animated = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
@@ -27,6 +34,7 @@ export function Press({ style, children, haptic, scaleTo = PRESS_SCALE, onPressI
   return (
     <AnimatedPressable
       {...rest}
+      disabled={disabled}
       hitSlop={rest.hitSlop ?? 6}
       pressRetentionOffset={{ top: 16, left: 16, right: 16, bottom: 16 }}
       onPressIn={(e) => {
@@ -41,7 +49,7 @@ export function Press({ style, children, haptic, scaleTo = PRESS_SCALE, onPressI
         if (haptic) Haptics.selectionAsync().catch(() => {});
         onPress?.(e);
       }}
-      style={[style, animated]}>
+      style={[style, disabled ? { opacity: 0.45 } : null, animated]}>
       {children}
     </AnimatedPressable>
   );

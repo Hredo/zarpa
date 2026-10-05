@@ -19,7 +19,7 @@ export function TrailMark({ tier, width = 22 }: { tier: number; width?: number }
   const info = rarityInfo(tier);
   const h = Math.round(width * 0.36);
   const color =
-    info.mark === 'green' ? '#2E8B4E' : info.mark === 'yellow' ? '#F5C400' : info.mark === 'red' ? '#D32F27' : '#FFFFFF';
+    info.mark === 'green' ? palette.leaf : info.mark === 'yellow' ? palette.sun : info.mark === 'red' ? palette.red : '#FFFFFF';
   return (
     <View
       accessibilityLabel={`Rareza: ${info.label}`}

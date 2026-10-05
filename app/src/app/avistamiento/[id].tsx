@@ -6,16 +6,20 @@ import { Alert, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Card } from '@/components/Card';
+import { GroupPill } from '@/components/GroupPill';
 import { HoloSticker } from '@/components/HoloSticker';
 import { Icon } from '@/components/Icon';
+import { Appear } from '@/components/motion';
 import { Press } from '@/components/Press';
 import { TrailMark } from '@/components/TrailMark';
 import { Txt } from '@/components/Txt';
 import { getBreed, getSpecies, type Breed, type SpeciesDetail } from '@/db/catalog';
 import { fmt1, fmtCoords, fmtDate, fmtTime } from '@/lib/format';
+import { displayName } from '@/lib/speciesName';
 import { rarityInfo } from '@/lib/groups';
 import { getSighting, sightingsOf, useJournal, type Sighting } from '@/store/journal';
-import { duration, ease, radius, space, usePalette } from '@/theme';
+import { duration, ease, groupColor, radius, space, usePalette } from '@/theme';
 
 export default function Avistamiento() {
   const { id, nuevo } = useLocalSearchParams<{ id: string; nuevo?: string }>();
@@ -41,6 +45,23 @@ export default function Avistamiento() {
     });
   }, [id]);
 
+  // Revelación del cromo recién fichado: la pegatina se «despega» con un
+  // fundido y una escala de 0,9 a 1 mientras un halo del color de su grupo se
+  // abre detrás. Sin rebote; con «reducir movimiento» solo funde.
+  const isNew = nuevo === '1';
+  const reveal = useSharedValue(isNew && !reduced ? 0 : 1);
+  useEffect(() => {
+    if (isNew) reveal.set(withDelay(80, withTiming(1, { duration: duration.reveal, easing: ease.out })));
+  }, [isNew, reveal]);
+  const stickerReveal = useAnimatedStyle(() => ({
+    opacity: Math.min(1, reveal.get() * 1.6),
+    transform: [{ scale: 0.9 + 0.1 * reveal.get() }],
+  }));
+  const haloReveal = useAnimatedStyle(() => ({
+    opacity: reveal.get(),
+    transform: [{ scale: 0.55 + 0.45 * reveal.get() }],
+  }));
+
   // Sello de «nueva especie»: entra con un leve giro y se asienta. Solo la
   // primera vez que se ficha esa especie (lo raro es lo que merece el gesto).
   const stamp = useSharedValue(reduced ? 1 : 0);
@@ -51,7 +72,7 @@ export default function Avistamiento() {
   }, [nuevo, firstOfSpecies, stamp]);
   const stampStyle = useAnimatedStyle(() => ({
     opacity: stamp.get(),
-    transform: [{ rotate: `${-14 + 4 * stamp.get()}deg` }, { scale: 1.15 - 0.15 * stamp.get() }],
+    transform: [{ rotate: `${-10 + 4 * stamp.get()}deg` }, { scale: reduced ? 1 : 1.12 - 0.12 * stamp.get() }],
   }));
 
   if (s === undefined) return <View style={[styles.fill, { backgroundColor: palette.bg }]} />;
@@ -59,14 +80,18 @@ export default function Avistamiento() {
     return (
       <View style={[styles.fill, styles.center, { backgroundColor: palette.bg }]}>
         <Txt variant="heading">Este avistamiento ya no existe</Txt>
-        <Press onPress={() => router.back()} style={{ padding: space.lg }}>
-          <Txt variant="bodyStrong">Volver</Txt>
+        <Press onPress={() => router.back()} style={[styles.primary, { backgroundColor: palette.strong, marginTop: space.lg, paddingHorizontal: space.xl }]}>
+          <Txt variant="bodyStrong" tone="onStrong">
+            Volver
+          </Txt>
         </Press>
       </View>
     );
   }
 
-  const name = sp ? (sp.name_es ?? sp.name_en ?? sp.sci) : 'Sin especie';
+  const dn = sp ? displayName(sp) : null;
+  const name = dn ? dn.name : 'Sin especie';
+  const g = groupColor(sp?.grp);
   const foil = !!sp && sp.rarity >= 4;
   const stickerSize = Math.min(width - space.xl * 2, 360);
 
@@ -93,36 +118,61 @@ export default function Avistamiento() {
     <View style={[styles.fill, { backgroundColor: palette.bg }]}>
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + space.sm, paddingBottom: insets.bottom + space.xxxl }}>
         <View style={styles.topBar}>
-          <Press onPress={() => (nuevo ? router.replace('/cuaderno') : router.back())} accessibilityLabel="Volver" style={[styles.round, { borderColor: palette.line }]}>
+          <Press onPress={() => (nuevo ? router.replace('/cuaderno') : router.back())} accessibilityLabel="Volver" style={[styles.round, { backgroundColor: palette.surface }]}>
             <Icon name={nuevo ? 'close' : 'back'} />
           </Press>
-          <Press onPress={share} accessibilityLabel="Compartir la pegatina" style={[styles.round, { borderColor: palette.line }]}>
+          <Press onPress={share} accessibilityLabel="Compartir la pegatina" style={[styles.round, { backgroundColor: palette.surface }]}>
             <Icon name="share" />
           </Press>
         </View>
 
         <View style={styles.stickerArea}>
-          {s.sticker?.endsWith('.png') ? (
-            <HoloSticker uri={s.sticker} size={stickerSize} foil={foil} />
-          ) : (
-            <Image source={s.sticker ?? s.photo} style={{ width: stickerSize, height: stickerSize, borderRadius: radius.lg }} contentFit="cover" />
-          )}
-          {nuevo === '1' && firstOfSpecies && (
-            <Animated.View style={[styles.stamp, { borderColor: palette.trailRed }, stampStyle]}>
-              <Txt variant="subheading" tone="trailRed" upper>
-                Nueva especie
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.halo, { width: stickerSize * 0.92, height: stickerSize * 0.92, borderRadius: stickerSize, backgroundColor: g.tint }, haloReveal]}
+          />
+          <Animated.View style={stickerReveal}>
+            {s.sticker?.endsWith('.png') ? (
+              <HoloSticker uri={s.sticker} size={stickerSize} foil={foil} />
+            ) : (
+              <Image source={s.sticker ?? s.photo} style={{ width: stickerSize, height: stickerSize, borderRadius: radius.lg }} contentFit="cover" />
+            )}
+          </Animated.View>
+          {isNew && firstOfSpecies && (
+            <Animated.View style={[styles.stamp, { borderColor: palette.red, backgroundColor: palette.surface }, stampStyle]}>
+              <Txt variant="subheading" tone="red">
+                ¡Especie nueva!
               </Txt>
             </Animated.View>
           )}
         </View>
 
+        {isNew ? (
+          <Appear delay={500} from="none" style={styles.pasted}>
+            <View style={[styles.pastedPill, { backgroundColor: palette.leafTint }]}>
+              <Icon name="check" size={18} color={palette.leaf} strokeWidth={2.4} />
+              <Txt variant="label">
+                Pegada en tu álbum
+              </Txt>
+            </View>
+          </Appear>
+        ) : null}
+
         <View style={styles.body}>
-          <Txt variant={name.length > 22 ? 'title' : 'hero'}>{name}</Txt>
+          <Txt
+            variant={name.length > 22 ? 'title' : 'hero'}
+            accessibilityRole="header"
+            style={dn?.isSci ? { fontStyle: 'italic' } : undefined}>
+            {name}
+          </Txt>
           {sp && (
             <View style={styles.row}>
-              <Txt variant="sci" tone="soft">
-                {sp.sci}
-              </Txt>
+              <GroupPill code={sp.grp} />
+              {dn && !dn.isSci ? (
+                <Txt variant="sci" tone="soft" numberOfLines={1} style={{ flexShrink: 1 }}>
+                  {sp.sci}
+                </Txt>
+              ) : null}
               <TrailMark tier={sp.rarity} />
               <Txt variant="label" tone="soft">
                 {rarityInfo(sp.rarity).label}
@@ -130,7 +180,7 @@ export default function Avistamiento() {
             </View>
           )}
 
-          <View style={[styles.label, { backgroundColor: palette.surface, borderColor: palette.line }]}>
+          <Card tone="outline" style={styles.label}>
             <Line k="Fecha" v={`${fmtDate(s.created_at)}, ${fmtTime(s.created_at)}`} />
             {breed ? <Line k="Raza (según tú)" v={breed.name} /> : null}
             {s.place ? <Line k="Lugar" v={s.place} /> : null}
@@ -145,9 +195,9 @@ export default function Avistamiento() {
                     : 'Elegida a mano · sin verificar'
               }
             />
-          </View>
+          </Card>
 
-          <Txt variant="label" tone="faint" style={{ marginTop: space.xl, marginBottom: space.sm }}>
+          <Txt variant="subheading" style={{ marginTop: space.xl, marginBottom: space.sm }}>
             Foto original
           </Txt>
           <Image source={s.photo} style={[styles.photo, { backgroundColor: palette.surfaceAlt }]} contentFit="cover" />
@@ -156,15 +206,16 @@ export default function Avistamiento() {
             {sp && (
               <Press
                 onPress={() => router.push({ pathname: '/especie/[id]', params: { id: String(sp.id) } })}
-                style={[styles.primary, { backgroundColor: palette.forest }]}>
-                <Txt variant="bodyStrong" tone="onForest">
-                  Ver la ficha
+                style={[styles.primary, { backgroundColor: palette.brand }]}>
+                <Txt variant="bodyStrong" tone="onBrand">
+                  Ver la ficha de la especie
                 </Txt>
               </Press>
             )}
-            <Press onPress={remove} style={styles.danger}>
+            <Press onPress={remove} accessibilityLabel="Despegar esta pegatina del cuaderno" style={[styles.danger, { borderColor: palette.danger }]}>
+              <Icon name="close" size={18} color={palette.danger} />
               <Txt variant="bodyStrong" tone="danger">
-                Despegar
+                Despegar del cuaderno
               </Txt>
             </Press>
           </View>
@@ -191,17 +242,20 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.lg },
-  round: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  stickerArea: { alignItems: 'center', marginTop: space.lg },
-  stamp: { position: 'absolute', right: space.xl, top: space.md, borderWidth: 3, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: space.xs },
+  round: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  stickerArea: { alignItems: 'center', justifyContent: 'center', marginTop: space.lg },
+  halo: { position: 'absolute' },
+  pasted: { alignItems: 'center', marginTop: space.md },
+  pastedPill: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2, minHeight: 36, paddingHorizontal: space.md, borderRadius: radius.pill },
+  stamp: { position: 'absolute', right: space.lg, top: space.md, borderWidth: 3, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.xs },
   body: { paddingHorizontal: space.lg, marginTop: space.xl },
-  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.xs },
-  label: { marginTop: space.xl, borderWidth: 1, borderRadius: radius.md, padding: space.lg, gap: space.sm },
+  row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space.md, marginTop: space.sm },
+  label: { marginTop: space.xl, gap: space.sm },
   line: { flexDirection: 'row', gap: space.md },
   lineK: { width: 104, paddingTop: 3 },
   lineV: { flex: 1 },
   photo: { width: '100%', aspectRatio: 3 / 4, borderRadius: radius.md },
   actions: { marginTop: space.xl, gap: space.sm },
-  primary: { height: 52, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
-  danger: { height: 48, alignItems: 'center', justifyContent: 'center' },
+  primary: { height: 56, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  danger: { height: 52, borderRadius: radius.pill, borderWidth: 1.5, flexDirection: 'row', gap: space.sm, alignItems: 'center', justifyContent: 'center' },
 });

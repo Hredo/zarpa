@@ -5,7 +5,10 @@ import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BreedLine } from '@/components/BreedLine';
+import { Chip } from '@/components/Chip';
+import { GroupPill } from '@/components/GroupPill';
 import { Icon } from '@/components/Icon';
+import { Appear } from '@/components/motion/Appear';
 import { Press } from '@/components/Press';
 import { Txt } from '@/components/Txt';
 import {
@@ -18,10 +21,11 @@ import {
   type BreedRow,
 } from '@/db/catalog';
 import { COUNTRY_NAME } from '@/lib/countries';
+import { displayName } from '@/lib/speciesName';
 import { fmtInt } from '@/lib/format';
 import { AUTHORITY_LABEL } from '@/lib/groups';
 import { useUserCountry } from '@/lib/location';
-import { radius, space, type, usePalette } from '@/theme';
+import { elevation, groupColor, radius, space, type, usePalette } from '@/theme';
 
 const PAGE = 60;
 
@@ -36,6 +40,7 @@ export default function Razas() {
   const userCc = useUserCountry();
 
   const [name, setName] = useState('');
+  const [grp, setGrp] = useState<string | null>(null);
   const [totals, setTotals] = useState<Partial<Record<Authority, number>>>({});
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -43,7 +48,10 @@ export default function Razas() {
   const [onlyMine, setOnlyMine] = useState(false);
 
   useEffect(() => {
-    getSpecies(speciesId).then((sp) => setName(sp ? (sp.name_es ?? sp.sci) : ''));
+    getSpecies(speciesId).then((sp) => {
+      setName(sp ? displayName(sp).name : '');
+      setGrp(sp?.grp ?? null);
+    });
     breedTotals(speciesId).then(setTotals);
   }, [speciesId]);
 
@@ -83,19 +91,21 @@ export default function Razas() {
   const open = useCallback((breedId: string) => router.push({ pathname: '/raza/[id]', params: { id: breedId } }), []);
   const authorities = (Object.keys(totals) as Authority[]).filter((a) => (totals[a] ?? 0) > 0);
   const total = page.key === key ? page.total : null;
+  const g = groupColor(grp);
 
   const header = (
-    <View style={{ paddingTop: insets.top + space.sm }}>
+    <View>
+      <View style={[styles.band, { backgroundColor: g.tint, paddingTop: insets.top + space.sm }]}>
       <View style={styles.top}>
-        <Press onPress={() => router.back()} accessibilityLabel="Volver" style={styles.back}>
+        <Press onPress={() => router.back()} accessibilityLabel="Volver" style={[styles.back, { backgroundColor: palette.surface }, elevation.card]}>
           <Icon name="back" size={22} color={palette.ink} />
         </Press>
       </View>
-      <View style={styles.pad}>
-        <Txt variant="data" tone="faint">
-          Razas reconocidas
+      <Appear style={styles.pad}>
+        {grp ? <GroupPill code={grp} size="md" form="plural" /> : null}
+        <Txt variant="title" style={styles.title}>
+          {name}
         </Txt>
-        <Txt variant="title">{name}</Txt>
         <Txt variant="body" tone="soft" style={styles.lead}>
           {lead(authorities)}
         </Txt>
@@ -118,13 +128,16 @@ export default function Razas() {
             </Press>
           )}
         </View>
+      </Appear>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, styles.pad]}>
         {userCc && (
           <Chip
             label={`De ${COUNTRY_NAME[userCc] ?? userCc}`}
-            on={onlyMine}
+            icon="pin"
+            color={g}
+            selected={onlyMine}
             onPress={() => setOnlyMine((v) => !v)}
           />
         )}
@@ -132,8 +145,10 @@ export default function Razas() {
           authorities.map((a) => (
             <Chip
               key={a}
-              label={`${AUTHORITY_LABEL[a]} · ${fmtInt(totals[a] ?? 0)}`}
-              on={authority === a}
+              label={AUTHORITY_LABEL[a]}
+              count={fmtInt(totals[a] ?? 0)}
+              color={g}
+              selected={authority === a}
               onPress={() => setAuthority((cur) => (cur === a ? null : a))}
             />
           ))}
@@ -155,7 +170,7 @@ export default function Razas() {
         ListHeaderComponent={header}
         renderItem={({ item }) => (
           <View style={styles.pad}>
-            <BreedLine breed={item} onPress={open} showAuthority={authorities.length > 1 && !authority} />
+            <BreedLine breed={item} tint={g.tint} onPress={open} showAuthority={authorities.length > 1 && !authority} />
           </View>
         )}
         onEndReached={loadMore}
@@ -190,31 +205,17 @@ function lead(authorities: Authority[]): string {
   return `Solo razas reconocidas por ${list}. Las extinguidas no aparecen.`;
 }
 
-function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
-  const palette = usePalette();
-  return (
-    <Press
-      onPress={onPress}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: on }}
-      style={[styles.chip, { backgroundColor: on ? palette.forest : palette.surface, borderColor: on ? palette.forest : palette.line }]}>
-      <Txt variant="label" tone={on ? 'onForest' : 'ink'}>
-        {label}
-      </Txt>
-    </Press>
-  );
-}
-
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  top: { paddingHorizontal: space.sm },
-  back: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  band: { paddingBottom: space.lg, borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl },
+  title: { marginTop: space.sm },
+  top: { paddingHorizontal: space.lg, marginBottom: space.md },
+  back: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   pad: { paddingHorizontal: space.lg },
   lead: { marginTop: space.sm, marginBottom: space.lg },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 48, paddingHorizontal: space.md, borderRadius: radius.md, borderWidth: 1 },
   input: { flex: 1, paddingVertical: 0 },
   chips: { gap: space.sm, paddingVertical: space.md },
-  chip: { minHeight: 40, paddingHorizontal: space.md, borderRadius: radius.pill, borderWidth: 1, justifyContent: 'center' },
   count: { paddingBottom: space.xs },
   empty: { marginTop: space.lg, borderWidth: 1, borderStyle: 'dashed', borderRadius: radius.lg, paddingVertical: space.xl },
 });

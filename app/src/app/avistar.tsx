@@ -32,6 +32,7 @@ import { Reticle } from '@/components/scanner/Reticle';
 import { Txt } from '@/components/Txt';
 import { getSpeciesByIds } from '@/db/catalog';
 import { discardCapture, processCapture, type CaptureResult } from '@/lib/capture';
+import { displayName } from '@/lib/speciesName';
 import { prepareCutout } from '@/lib/cutout';
 import { fmt1 } from '@/lib/format';
 import { countryOf, currentLocation, type Coords } from '@/lib/location';
@@ -57,6 +58,13 @@ const EMBED_EVERY_N_FRAMES = 18; // ~0,6 s a 30 fps
 const FRAME_ASPECT = 480 / 640;
 
 type Phase = 'live' | 'capturing' | 'review';
+
+const LEVEL_ES: Record<string, string> = {
+  class: 'la clase',
+  order: 'el orden',
+  family: 'la familia',
+  genus: 'el género',
+};
 
 const CLASS_ES: Record<string, string> = {
   Aves: 'Aves',
@@ -225,7 +233,7 @@ export default function Avistar() {
         if (fixed && v?.speciesId) {
           if (lock.get() !== 2) Haptics.selectionAsync().catch(() => {});
           lock.set(2);
-          getSpeciesByIds([v.speciesId]).then(([s]) => setLockedName(s ? (s.name_es ?? s.name_en ?? s.sci) : null));
+          getSpeciesByIds([v.speciesId]).then(([s]) => setLockedName(s ? displayName(s).name : null));
         } else if (!v?.speciesId) {
           if (lock.get() === 2) lock.set(lastBox.current ? 1 : 0);
           setLockedName(null);
@@ -313,25 +321,27 @@ export default function Avistar() {
   // --- render ---------------------------------------------------------------
   if (!permission.hasPermission) {
     return (
-      <View style={[styles.fill, styles.center, { backgroundColor: palette.forestDeep, padding: space.xl }]}>
-        <Icon name="camera" size={56} color={palette.onForest} />
-        <Txt variant="title" tone="onForest" align="center" style={{ marginTop: space.lg }}>
+      <View style={[styles.fill, styles.center, { backgroundColor: palette.strongDeep, padding: space.xl }]}>
+        <View style={[styles.permIcon, { backgroundColor: palette.brand }]}>
+          <Icon name="camera" size={40} color={palette.onBrand} />
+        </View>
+        <Txt variant="title" tone="onStrong" align="center" style={{ marginTop: space.xl }}>
           Necesitamos la cámara
         </Txt>
-        <Txt variant="body" tone="onForestSoft" align="center" style={{ marginTop: space.sm }}>
-          El visor reconoce al animal en directo y su foto se convierte en tu pegatina. Las fotos se quedan en tu
-          móvil.
+        <Txt variant="body" tone="onStrongSoft" align="center" style={{ marginTop: space.sm }}>
+          El visor reconoce al animal en directo y su foto se convierte en tu cromo. La IA funciona en tu móvil y las
+          fotos no salen de él.
         </Txt>
         <Press
           haptic
           onPress={() => permission.requestPermission()}
-          style={[styles.primary, { backgroundColor: palette.blaze, borderColor: palette.ink, marginTop: space.xl }]}>
-          <Txt variant="bodyStrong" tone="onBlaze">
-            Dar permiso
+          style={[styles.primary, { backgroundColor: palette.brand, marginTop: space.xl }]}>
+          <Txt variant="bodyStrong" tone="onBrand">
+            Dar permiso de cámara
           </Txt>
         </Press>
         <Press onPress={() => router.back()} style={{ marginTop: space.lg, padding: space.md }}>
-          <Txt variant="bodyStrong" tone="onForest">
+          <Txt variant="bodyStrong" tone="onStrong">
             Ahora no
           </Txt>
         </Press>
@@ -339,12 +349,23 @@ export default function Avistar() {
     );
   }
 
+  // Qué le dice el visor al usuario en cada momento: una frase, sin jerga.
+  const hint = (() => {
+    if (phase === 'capturing') return 'Revelando tu foto…';
+    if (lockedName) return `Es ${lockedName}. Pulsa el botón para fichar.`;
+    if (verdict?.level && verdict.level !== 'species' && verdict.taxon) {
+      return `Parece de ${LEVEL_ES[verdict.level]} ${verdict.taxon}. Acércate o espera un momento para afinar.`;
+    }
+    if (verdict) return 'Aún no lo tengo claro. Acércate, busca más luz o cambia de ángulo.';
+    return 'Apunta al animal y mantén el móvil quieto.';
+  })();
+
   const names: Partial<Record<Rank, string | null>> = {
     class: verdict?.ladder.class ? (CLASS_ES[verdict.ladder.class.name] ?? verdict.ladder.class.name) : null,
   };
 
   return (
-    <View style={[styles.fill, { backgroundColor: '#000' }]}>
+    <View style={[styles.fill, { backgroundColor: palette.strongDeep }]}>
       <StatusBar style="light" />
       <GestureDetector gesture={pinch}>
         <View style={styles.fill}>
@@ -361,28 +382,28 @@ export default function Avistar() {
             />
           ) : (
             <View style={[styles.fill, styles.center]}>
-              <Txt variant="body" color="#fff">
+              <Txt variant="body" tone="onStrong">
                 No se encuentra la cámara trasera
               </Txt>
             </View>
           )}
-          <Reticle x={rx} y={ry} w={rw} h={rh} lock={lock} color="#FFFFFF" lockColor={palette.blaze} />
+          <Reticle x={rx} y={ry} w={rw} h={rh} lock={lock} color={palette.onStrong} lockColor={palette.brand} />
         </View>
       </GestureDetector>
 
       {/* Barra superior */}
       <View style={[styles.top, { paddingTop: insets.top + space.sm }]} pointerEvents="box-none">
         <Press onPress={() => router.back()} accessibilityLabel="Cerrar el visor" style={styles.roundDark}>
-          <Icon name="close" color="#fff" />
+          <Icon name="close" color={palette.onStrong} />
         </Press>
         <AiStatus />
         <Press
           onPress={() => setFlash((f) => (f === 'off' ? 'auto' : f === 'auto' ? 'on' : 'off'))}
           accessibilityLabel={`Flash: ${flash === 'off' ? 'apagado' : flash === 'auto' ? 'automático' : 'encendido'}`}
           style={styles.roundDark}>
-          <Icon name={flash === 'off' ? 'flashOff' : 'flash'} color={flash === 'on' ? palette.blaze : '#fff'} />
+          <Icon name={flash === 'off' ? 'flashOff' : 'flash'} color={flash === 'on' ? palette.brand : palette.onStrong} />
           {flash === 'auto' && (
-            <Txt variant="data" color="#fff" style={styles.flashAuto}>
+            <Txt variant="data" tone="onStrong" style={styles.flashAuto}>
               A
             </Txt>
           )}
@@ -392,13 +413,22 @@ export default function Avistar() {
       {/* Escalera, zoom y disparador */}
       <View style={[styles.bottom, { paddingBottom: insets.bottom + space.md }]} pointerEvents="box-none">
         {ai.species === 'ready' ? (
-          <LadderHud verdict={verdict} speciesName={lockedName} names={names} />
+          <>
+            <View
+              accessibilityLiveRegion="polite"
+              style={[styles.hint, { backgroundColor: lockedName ? palette.brand : palette.scrim }]}>
+              <Txt variant="bodyStrong" tone={lockedName ? 'onBrand' : 'onStrong'} align="center">
+                {hint}
+              </Txt>
+            </View>
+            <LadderHud verdict={verdict} speciesName={lockedName} names={names} />
+          </>
         ) : (
-          <View style={[styles.notice, { backgroundColor: 'rgba(8,14,10,0.7)' }]}>
-            <Txt variant="small" color="#fff" align="center">
+          <View style={[styles.notice, { backgroundColor: palette.scrim }]}>
+            <Txt variant="small" tone="onStrong" align="center">
               {ai.species === 'loading'
                 ? `Preparando el reconocimiento de especies… ${fmt1(ai.speciesProgress * 100)} %`
-                : 'El reconocimiento de especies aún no está instalado: haz la foto y elige la especie tú. Se guardará como no verificada.'}
+                : 'El reconocimiento de especies aún no está instalado: haz la foto y elige la especie tú. Se guardará como «sin verificar».'}
             </Txt>
           </View>
         )}
@@ -411,16 +441,16 @@ export default function Avistar() {
                 key={p}
                 onPress={() => zoom.set(withTiming(p * base, { duration: duration.enter, easing: ease.out }))}
                 accessibilityLabel={`Zoom ${p} aumentos`}
-                style={[styles.zoomPill, selected && { backgroundColor: 'rgba(255,255,255,0.92)' }]}>
-                <Txt variant="data" color={selected ? '#0F1A14' : '#fff'}>
+                style={[styles.zoomPill, { backgroundColor: selected ? palette.surface : palette.scrim }]}>
+                <Txt variant="data" color={selected ? palette.ink : palette.onStrong}>
                   {`${p}`.replace('.', ',')}×
                 </Txt>
               </Press>
             );
           })}
           {!presets.some((p) => zoomLabel === `${p}`.replace('.', ',') + '×') && (
-            <View style={[styles.zoomPill, { backgroundColor: 'rgba(255,255,255,0.92)' }]}>
-              <Txt variant="data" color="#0F1A14">
+            <View style={[styles.zoomPill, { backgroundColor: palette.surface }]}>
+              <Txt variant="data" color={palette.ink}>
                 {zoomLabel}
               </Txt>
             </View>
@@ -435,12 +465,12 @@ export default function Avistar() {
             accessibilityLabel={lockedName ? `Fichar ${lockedName}` : 'Hacer la foto'}
             style={[
               styles.shutter,
-              { borderColor: lockedName ? palette.blaze : '#FFFFFF', opacity: phase === 'live' ? 1 : 0.5 },
+              { borderColor: lockedName ? palette.brand : palette.onStrong, opacity: phase === 'live' ? 1 : 0.5 },
             ]}>
-            <View style={[styles.shutterCore, { backgroundColor: lockedName ? palette.blaze : '#FFFFFF' }]} />
+            <View style={[styles.shutterCore, { backgroundColor: lockedName ? palette.brand : palette.onStrong }]} />
           </Press>
           {lockedName ? (
-            <Txt variant="label" color={palette.blaze} style={styles.shutterLabel}>
+            <Txt variant="label" color={palette.brand} style={styles.shutterLabel}>
               Fichar
             </Txt>
           ) : null}
@@ -456,17 +486,22 @@ export default function Avistar() {
 
 function AiStatus() {
   const ai = useAI();
+  const palette = usePalette();
   const text =
     ai.detector === 'loading'
-      ? `Cargando el detector ${fmt1(ai.detectorProgress * 100)} %`
+      ? `Preparando el detector… ${fmt1(ai.detectorProgress * 100)} %`
       : ai.detector === 'error'
         ? 'Sin detector en este móvil'
         : ai.species === 'ready'
-          ? 'Reconocimiento activo'
-          : 'Detector activo';
+          ? 'IA lista'
+          : ai.species === 'loading'
+            ? 'Preparando la IA…'
+            : 'Detector listo';
+  const dot = ai.detector === 'error' ? palette.red : ai.detector === 'loading' || ai.species === 'loading' ? palette.sun : palette.leaf;
   return (
-    <View style={styles.status}>
-      <Txt variant="data" color="#fff" numberOfLines={1}>
+    <View style={[styles.status, { backgroundColor: palette.scrim }]}>
+      <View style={[styles.statusDot, { backgroundColor: dot }]} />
+      <Txt variant="label" tone="onStrong" numberOfLines={1}>
         {text}
       </Txt>
     </View>
@@ -487,30 +522,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
   },
   roundDark: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(8,14,10,0.55)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(12, 21, 41, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   flashAuto: { position: 'absolute', right: 6, bottom: 4, fontSize: 10 },
-  status: { paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: 'rgba(8,14,10,0.55)', maxWidth: '60%' },
+  status: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.md, minHeight: 32, borderRadius: radius.pill, maxWidth: '60%' },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  hint: { alignSelf: 'center', marginHorizontal: space.lg, paddingHorizontal: space.lg, paddingVertical: space.sm, borderRadius: radius.lg },
+  permIcon: { width: 80, height: 80, borderRadius: radius.xl, alignItems: 'center', justifyContent: 'center' },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, gap: space.md },
   notice: { marginHorizontal: space.lg, padding: space.md, borderRadius: radius.md },
   zoomRow: { flexDirection: 'row', justifyContent: 'center', gap: space.sm },
   zoomPill: {
     minWidth: 44,
-    height: 32,
+    height: 40,
     paddingHorizontal: 8,
-    borderRadius: 16,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(8,14,10,0.55)',
+    backgroundColor: 'rgba(12, 21, 41, 0.55)',
   },
   shutterRow: { alignItems: 'center', gap: 4 },
   shutter: { width: 78, height: 78, borderRadius: 39, borderWidth: 4, alignItems: 'center', justifyContent: 'center' },
   shutterCore: { width: 60, height: 60, borderRadius: 30 },
   shutterLabel: { position: 'absolute', bottom: -16 },
-  primary: { height: 52, paddingHorizontal: space.xl, borderRadius: radius.pill, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  primary: { height: 52, paddingHorizontal: space.xl, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
 });

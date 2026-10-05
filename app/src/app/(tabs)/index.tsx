@@ -1,33 +1,57 @@
-import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Cromo } from '@/components/Cromo';
+import { Card } from '@/components/Card';
+import { Cromo, listThumb } from '@/components/Cromo';
+import { GroupPill } from '@/components/GroupPill';
+import { GroupTile } from '@/components/GroupTile';
 import { Icon } from '@/components/Icon';
+import { Logo } from '@/components/Logo';
+import { Meter } from '@/components/Meter';
+import { Appear } from '@/components/motion/Appear';
+import { AnimatedNumber } from '@/components/motion/AnimatedNumber';
+import { FadeImage } from '@/components/motion/FadeImage';
 import { Press } from '@/components/Press';
+import { Section } from '@/components/Section';
+import { StatTile } from '@/components/StatTile';
 import { TrailMark } from '@/components/TrailMark';
 import { Txt } from '@/components/Txt';
-import { getSpeciesByIds, type SpeciesRow } from '@/db/catalog';
+import { getSpeciesByIds, groupTotals, type SpeciesRow } from '@/db/catalog';
 import { CATALOG_SPECIES } from '@/db/catalogAsset';
 import { fmtAgo, fmtInt } from '@/lib/format';
+import { GROUPS, rarityInfo, type GroupCode } from '@/lib/groups';
 import { useLastLocation, type Coords } from '@/lib/location';
 import { nearbySpecies } from '@/lib/remote';
+import { displayName } from '@/lib/speciesName';
+import { useSpeciesOfTheDay } from '@/lib/speciesOfDay';
+import { expandUrl } from '@/lib/urls';
+import { useFilters } from '@/store/filters';
 import { listSightings, useJournal, type Sighting } from '@/store/journal';
-import { radius, space, usePalette } from '@/theme';
+import { elevation, groupColor, HIT, radius, space, usePalette } from '@/theme';
+
+const GUTTER = space.lg;
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 6) return 'Buenas noches';
+  if (h < 13) return 'Buenos días';
+  if (h < 21) return 'Buenas tardes';
+  return 'Buenas noches';
+}
 
 /*
- * Rastro: el punto de partida de cada salida.
- *
- * Lo primero que se ve no es un saludo ni una cifra: es lo que vive cerca
- * ahora mismo y aún no tienes, con foto. Es la razón para salir. Los datos son
- * observaciones confirmadas a menos de 10 km (iNaturalist, en vivo).
+ * Inicio: acogedor y con una sola acción clara. De arriba abajo: saludo con el
+ * logo, el botón grande de Avistar, la especie del día con foto grande, lo que
+ * vive cerca de ti, tu progreso y un acceso rápido por grupos. Es una pantalla
+ * que se abre pocas veces al día y no se recicla, así que entra escalonada.
  */
-export default function Rastro() {
+export default function Inicio() {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const last = useLastLocation();
   const [manual, setManual] = useState<Coords | null>(null);
   const coords = manual ?? last;
@@ -36,10 +60,13 @@ export default function Rastro() {
   // Resultado etiquetado con las coordenadas que lo produjeron: «cargando» es
   // que lo que hay no corresponde a la posición actual.
   const [found, setFound] = useState<{ key: string; rows: (SpeciesRow & { local: number })[] | null }>({ key: '', rows: null });
-  const [recent, setRecent] = useState<Sighting[]>([]);
-  const [recentSpecies, setRecentSpecies] = useState<Record<number, SpeciesRow>>({});
+  const [sightings, setSightings] = useState<Sighting[]>([]);
+  const [sightingSpecies, setSightingSpecies] = useState<Record<number, SpeciesRow>>({});
+  const [totals, setTotals] = useState<Record<string, number>>({});
   const caught = useJournal((s) => s.caught);
   const lastSightingAt = useJournal((s) => s.lastSightingAt);
+  const setFilters = useFilters((s) => s.set);
+  const today = useSpeciesOfTheDay();
 
   useEffect(() => {
     if (last) return;
@@ -84,11 +111,17 @@ export default function Rastro() {
       : found.rows === null
         ? 'offline'
         : 'idle';
+
   useEffect(() => {
-    listSightings(12).then(async (s) => {
-      setRecent(s);
-      const rows = await getSpeciesByIds(s.map((x) => x.species_id).filter((x): x is number => x != null));
-      setRecentSpecies(Object.fromEntries(rows.map((r) => [r.id, r])));
+    groupTotals().then((g) => setTotals(Object.fromEntries(g.map((x) => [x.code, x.total]))));
+  }, []);
+
+  useEffect(() => {
+    listSightings(1000).then(async (s) => {
+      setSightings(s);
+      const ids = [...new Set(s.map((x) => x.species_id).filter((x): x is number => x != null))];
+      const rows = await getSpeciesByIds(ids);
+      setSightingSpecies(Object.fromEntries(rows.map((r) => [r.id, r])));
     });
   }, [lastSightingAt]);
 
@@ -100,137 +133,279 @@ export default function Rastro() {
   }, []);
 
   const missing = useMemo(() => (nearby ?? []).filter((s) => !caught.has(s.id)), [nearby, caught]);
+  const explored = useMemo(() => new Set(Object.values(sightingSpecies).map((s) => s.grp)).size, [sightingSpecies]);
+  const recent = sightings.slice(0, 12);
   const open = useCallback((id: number) => router.push({ pathname: '/especie/[id]', params: { id: String(id) } }), []);
+  const openGroup = useCallback(
+    (code: GroupCode) => {
+      setFilters({ groups: [code], q: '' });
+      router.navigate('/bestiario');
+    },
+    [setFilters],
+  );
+
+  const tileW = Math.floor((width - GUTTER * 2 - space.md * 2) / 3);
+  const photoW = width - GUTTER * 2 - 12;
+  const photoH = Math.min(Math.round(photoW * 0.72), 360);
+  const todayG = today ? groupColor(today.grp) : null;
+  const todayName = today ? displayName(today) : null;
+  const progress = caught.size / CATALOG_SPECIES;
 
   return (
     <ScrollView
       style={{ backgroundColor: palette.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: space.xxxl }}>
-      <View style={styles.pad}>
-        <View style={styles.brandRow}>
-          <Txt variant="hero">Zarpa</Txt>
-          <View style={styles.tally}>
-            <Txt variant="dataLarge">{fmtInt(caught.size)}</Txt>
-            <Txt variant="data" tone="faint">
-              especies de {fmtInt(CATALOG_SPECIES)}
-            </Txt>
-          </View>
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: space.xxxl, paddingHorizontal: GUTTER }}>
+      <Appear from="none">
+        <View style={styles.head}>
+          <Logo variant="full" size={36} />
         </View>
+        <Txt variant="heading" style={styles.hello}>
+          {greeting()}
+        </Txt>
         <Txt variant="body" tone="soft">
-          {lastSightingAt ? `Tu último avistamiento fue ${fmtAgo(lastSightingAt)}.` : 'Tu cuaderno está en blanco. El primer animal que encuentres abre el rastro.'}
+          {lastSightingAt
+            ? `Tu último avistamiento fue ${fmtAgo(lastSightingAt)}. ¿Qué descubrimos hoy?`
+            : 'Sal a mirar: el primer animal que encuentres abre tu álbum.'}
         </Txt>
-      </View>
+      </Appear>
 
-      <View style={[styles.pad, styles.sectionHead]}>
-        <Txt variant="heading">Cerca de ti y sin fichar</Txt>
-      </View>
-      <View style={styles.pad}>
-        {nearbyState === 'noperm' ? (
-          <View style={[styles.card, { borderColor: palette.lineStrong }]}>
-            <Txt variant="bodyStrong">¿Qué vive por aquí?</Txt>
-            <Txt variant="small" tone="soft">
-              Con tu ubicación te enseñamos los animales que la gente ha visto a menos de 10 km. La ubicación no sale
-              del móvil salvo para esa consulta.
-            </Txt>
-            <Press onPress={askLocation} style={[styles.primarySmall, { backgroundColor: palette.forest }]}>
-              <Icon name="locate" size={18} color={palette.onForest} />
-              <Txt variant="label" tone="onForest">
-                Usar mi ubicación
-              </Txt>
-            </Press>
-          </View>
-        ) : nearbyState === 'offline' ? (
-          <Txt variant="small" tone="faint">
-            Sin conexión: los animales cercanos aparecerán cuando vuelva la red.
-          </Txt>
-        ) : nearbyState === 'loading' || nearby === null ? (
-          <Txt variant="small" tone="faint">
-            Buscando rastros cerca…
-          </Txt>
-        ) : missing.length === 0 ? (
-          <Txt variant="small" tone="faint">
-            Ya tienes todas las especies más vistas a tu alrededor. Toca ampliar el radio en el Atlas.
-          </Txt>
-        ) : null}
-      </View>
-      {missing.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
-          {missing.slice(0, 20).map((s) => (
-            <View key={s.id}>
-              <Cromo species={s} caught={false} width={152} onPress={open} />
-              <Txt variant="data" tone="faint" style={styles.localCount}>
-                {fmtInt(s.local)} vistas aquí
-              </Txt>
-            </View>
-          ))}
-        </ScrollView>
-      )}
-      {missing.length > 0 && (
-        <Txt variant="small" tone="faint" style={[styles.pad, { marginTop: space.xs }]}>
-          Observaciones confirmadas a menos de 10 km · iNaturalist
-        </Txt>
-      )}
-
-      <View style={[styles.pad, { marginTop: space.xl }]}>
+      <Appear index={1} style={styles.block}>
         <Press
           haptic
           onPress={() => router.push('/avistar')}
-          style={[styles.cta, { backgroundColor: palette.forest }]}>
+          accessibilityRole="button"
+          accessibilityLabel="Avistar un animal con la cámara"
+          style={[styles.cta, elevation.raised, { backgroundColor: palette.brand }]}>
           <View style={styles.ctaText}>
-            <Txt variant="title" tone="onForest">
-              Salir a avistar
+            <Txt variant="title" tone="onBrand">
+              Avistar un animal
             </Txt>
-            <Txt variant="small" tone="onForestSoft">
-              Apunta, deja que la IA lo reconozca y ficha su pegatina.
+            <Txt variant="body" tone="onBrand">
+              Apunta con la cámara y la IA lo reconoce.
             </Txt>
           </View>
-          <View style={[styles.ctaIcon, { backgroundColor: palette.blaze, borderColor: palette.ink }]}>
-            <Icon name="avistar" size={30} color={palette.onBlaze} strokeWidth={2.2} />
+          <View style={[styles.ctaIcon, { backgroundColor: palette.surface }]}>
+            <Icon name="avistar" size={32} color={palette.ink} strokeWidth={2.2} />
           </View>
         </Press>
-      </View>
+      </Appear>
 
-      {recent.length > 0 && (
-        <>
-          <View style={[styles.pad, styles.sectionHead]}>
-            <Txt variant="heading">Tus últimas pegatinas</Txt>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
-            {recent.map((s, i) => {
-              const sp = s.species_id != null ? recentSpecies[s.species_id] : undefined;
-              return (
-                <Press
-                  key={s.id}
-                  onPress={() => router.push({ pathname: '/avistamiento/[id]', params: { id: s.id } })}
-                  style={[styles.recent, { transform: [{ rotate: `${((i * 37) % 9) - 4}deg` }] }]}>
-                  <Image source={s.sticker ?? s.photo} style={styles.recentImg} contentFit="contain" />
-                  <Txt variant="label" numberOfLines={1} style={styles.recentName}>
-                    {sp ? (sp.name_es ?? sp.name_en ?? sp.sci) : 'Sin especie'}
+      {today && todayG && todayName ? (
+        <Appear index={2}>
+          <Section title="Especie del día" icon="sparkle" accent={palette.brandInk} tint={palette.brandTint}>
+            <Card padding={0} onPress={() => open(today.id)} accessibilityLabel={`Especie del día: ${todayName.name}`}>
+              <View style={styles.dayPad}>
+                <View style={[styles.dayPhoto, { height: photoH, backgroundColor: todayG.tint }]}>
+                  <FadeImage
+                    source={expandUrl(today.img) ?? listThumb(today.img)}
+                    style={StyleSheet.absoluteFill}
+                    placeholderColor={todayG.tint}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
+                  <View style={styles.dayPill}>
+                    <GroupPill code={today.grp} size="md" />
+                  </View>
+                </View>
+              </View>
+              <View style={styles.dayBody}>
+                <View style={styles.flex}>
+                  <Txt variant="heading" numberOfLines={2} style={todayName.isSci ? styles.italic : undefined}>
+                    {todayName.name}
                   </Txt>
-                  {sp ? <TrailMark tier={sp.rarity} width={18} /> : null}
-                </Press>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
+                  {!todayName.isSci ? (
+                    <Txt variant="sci" tone="soft" numberOfLines={1}>
+                      {today.sci}
+                    </Txt>
+                  ) : null}
+                  <View style={styles.dayMeta}>
+                    <TrailMark tier={today.rarity} width={24} />
+                    <Txt variant="small" tone="soft">
+                      {rarityInfo(today.rarity).label}
+                    </Txt>
+                    {caught.has(today.id) ? (
+                      <Txt variant="label" color={palette.leaf}>
+                        · Ya en tu cuaderno
+                      </Txt>
+                    ) : null}
+                  </View>
+                </View>
+                <Icon name="chevronRight" size={24} color={palette.inkSoft} />
+              </View>
+            </Card>
+          </Section>
+        </Appear>
+      ) : null}
+
+      <Appear index={3}>
+        <Section title="Cerca de ti" icon="pin" accent={palette.sky} tint={palette.skyTint}>
+          {nearbyState === 'noperm' ? (
+            <Card tone="tint" tint={palette.skyTint}>
+              <Txt variant="subheading">¿Qué vive por aquí?</Txt>
+              <Txt variant="body" tone="soft" style={styles.mt}>
+                Con tu ubicación te enseñamos los animales que la gente ha visto a menos de 10 km. Tu ubicación no sale del móvil salvo para esa
+                consulta.
+              </Txt>
+              <Press onPress={askLocation} accessibilityRole="button" style={[styles.btn, { backgroundColor: palette.strong }]}>
+                <Icon name="locate" size={20} color={palette.onStrong} />
+                <Txt variant="bodyStrong" tone="onStrong">
+                  Usar mi ubicación
+                </Txt>
+              </Press>
+            </Card>
+          ) : nearbyState === 'offline' ? (
+            <Card tone="outline">
+              <Txt variant="body" tone="soft">
+                Sin conexión. Los animales de tu zona aparecerán cuando vuelva la red.
+              </Txt>
+            </Card>
+          ) : nearbyState === 'loading' ? (
+            <Card tone="outline">
+              <Txt variant="body" tone="soft">
+                Buscando qué se ha visto cerca…
+              </Txt>
+            </Card>
+          ) : coords && nearby && missing.length === 0 ? (
+            <Card tone="tint" tint={palette.leafTint}>
+              <Txt variant="subheading">¡Tienes todo lo que vive a tu alrededor!</Txt>
+              <Txt variant="body" tone="soft" style={styles.mt}>
+                Amplía el radio en el Atlas para descubrir más.
+              </Txt>
+            </Card>
+          ) : null}
+        </Section>
+        {missing.length > 0 ? (
+          <View style={styles.bleed}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
+              {missing.slice(0, 20).map((s) => (
+                <View key={s.id}>
+                  <Cromo species={s} caught={false} width={152} onPress={open} />
+                  <Txt variant="small" tone="soft" style={styles.localCount}>
+                    {fmtInt(s.local)} {s.local === 1 ? 'vista' : 'vistas'} aquí
+                  </Txt>
+                </View>
+              ))}
+            </ScrollView>
+            <Txt variant="small" tone="faint" style={styles.credit}>
+              Aún sin fichar · observaciones confirmadas a menos de 10 km, de iNaturalist
+            </Txt>
+          </View>
+        ) : null}
+      </Appear>
+
+      <Appear index={4}>
+        <Section title="Tu progreso" icon="star" accent={palette.brandInk} tint={palette.sunTint}>
+          <Card>
+            <View style={styles.progressTop}>
+              <AnimatedNumber value={caught.size} variant="hero" />
+              <Txt variant="body" tone="soft" style={styles.progressOf}>
+                de {fmtInt(CATALOG_SPECIES)} especies
+              </Txt>
+            </View>
+            <Meter value={Math.max(progress, caught.size > 0 ? 0.015 : 0)} color={palette.brand} height={12} style={styles.mt} />
+            {caught.size === 0 ? (
+              <Txt variant="small" tone="soft" style={styles.mt}>
+                Cada especie que fiches se suma aquí.
+              </Txt>
+            ) : null}
+          </Card>
+          <View style={styles.tiles}>
+            <StatTile icon="eye" value={sightings.length} label="avistamientos" color={palette.sky} tint={palette.skyTint} delay={120} />
+            <StatTile
+              icon="globe"
+              value={explored}
+              label={explored === 1 ? 'grupo explorado' : 'grupos explorados'}
+              color={palette.leaf}
+              tint={palette.leafTint}
+              delay={200}
+            />
+          </View>
+        </Section>
+      </Appear>
+
+      <Appear index={5}>
+        <Section title="Explora por grupos" icon="bestiario" accent={palette.ink} tint={palette.strongTint}>
+          <View style={styles.grid}>
+            {GROUPS.filter((g) => (totals[g.code] ?? 0) > 0)
+              .slice(0, 9)
+              .map((g) => (
+                <GroupTile key={g.code} code={g.code} total={totals[g.code]} width={tileW} onPress={openGroup} />
+              ))}
+          </View>
+          <Press onPress={() => router.navigate('/bestiario')} accessibilityRole="button" style={[styles.btnGhost, { borderColor: palette.lineStrong }]}>
+            <Txt variant="bodyStrong">Ver todo el Bestiario</Txt>
+            <Icon name="chevronRight" size={20} color={palette.ink} />
+          </Press>
+        </Section>
+      </Appear>
+
+      {recent.length > 0 ? (
+        <Appear index={6}>
+          <Section title="Tus últimas pegatinas" icon="cuaderno" accent={palette.brandInk} tint={palette.brandTint}>
+            <View style={styles.bleed}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
+                {recent.map((s, i) => {
+                  const sp = s.species_id != null ? sightingSpecies[s.species_id] : undefined;
+                  const g = groupColor(sp?.grp);
+                  const nm = sp ? displayName(sp) : null;
+                  return (
+                    <Press
+                      key={s.id}
+                      onPress={() => router.push({ pathname: '/avistamiento/[id]', params: { id: s.id } })}
+                      accessibilityRole="button"
+                      accessibilityLabel={nm?.name ?? 'Avistamiento'}
+                      style={styles.recent}>
+                      <View style={[styles.recentBack, { backgroundColor: g.tint }]}>
+                        <FadeImage
+                          source={s.sticker ?? s.photo}
+                          style={[styles.recentImg, { transform: [{ rotate: `${((i * 37) % 9) - 4}deg` }] }]}
+                          contentFit="contain"
+                          placeholderColor="transparent"
+                        />
+                      </View>
+                      <Txt variant="label" numberOfLines={1} style={[styles.recentName, nm?.isSci ? styles.italic : null]}>
+                        {nm?.name ?? 'Sin especie'}
+                      </Txt>
+                    </Press>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </Section>
+        </Appear>
+      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  pad: { paddingHorizontal: space.lg },
-  brandRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: space.sm },
-  tally: { alignItems: 'flex-end', paddingBottom: 6 },
-  sectionHead: { marginTop: space.xxl, marginBottom: space.md },
-  card: { borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.lg, padding: space.lg, gap: space.sm },
-  primarySmall: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'flex-start', height: 44, paddingHorizontal: space.lg, borderRadius: radius.pill, marginTop: space.xs },
-  hscroll: { paddingHorizontal: space.lg, gap: space.md },
-  localCount: { marginTop: space.xs },
-  cta: { flexDirection: 'row', alignItems: 'center', borderRadius: radius.xl, padding: space.xl, gap: space.lg },
+  head: { flexDirection: 'row', alignItems: 'center', marginBottom: space.lg },
+  hello: { marginBottom: space.xs },
+  block: { marginTop: space.xl },
+  flex: { flex: 1 },
+  italic: { fontStyle: 'italic' },
+  mt: { marginTop: space.sm },
+  cta: { flexDirection: 'row', alignItems: 'center', borderRadius: radius.xl, paddingVertical: space.xl, paddingHorizontal: space.xl, gap: space.lg, minHeight: 112 },
   ctaText: { flex: 1, gap: space.xs },
-  ctaIcon: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  recent: { width: 120, alignItems: 'center', gap: 4 },
-  recentImg: { width: 112, height: 112 },
-  recentName: { maxWidth: 120 },
+  ctaIcon: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
+  dayPad: { padding: 6 },
+  dayPhoto: { borderRadius: radius.md, overflow: 'hidden' },
+  dayPill: { position: 'absolute', left: space.sm, bottom: space.sm },
+  dayBody: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.lg },
+  dayMeta: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm, height: HIT, paddingHorizontal: space.xl, borderRadius: radius.pill, alignSelf: 'flex-start', marginTop: space.md },
+  btnGhost: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.xs, height: HIT, borderRadius: radius.pill, borderWidth: 1.5, marginTop: space.lg },
+  bleed: { marginHorizontal: -GUTTER, marginTop: space.md },
+  hscroll: { paddingHorizontal: GUTTER, gap: space.md, paddingBottom: space.sm },
+  localCount: { marginTop: space.xs },
+  credit: { marginTop: space.sm, paddingHorizontal: GUTTER },
+  progressTop: { flexDirection: 'row', alignItems: 'baseline', gap: space.sm, flexWrap: 'wrap' },
+  progressOf: { flexShrink: 1 },
+  tiles: { flexDirection: 'row', gap: space.md, marginTop: space.md },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  recent: { width: 112, alignItems: 'center', gap: space.xs },
+  recentBack: { width: 112, height: 112, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
+  recentImg: { width: 100, height: 100 },
+  recentName: { maxWidth: 112 },
 });

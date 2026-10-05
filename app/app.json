@@ -6,7 +6,8 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "zarpa",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F7F6F2",
     "ios": {
       "bundleIdentifier": "com.hrval.zarpa",
       "deploymentTarget": "17.0",
@@ -34,7 +35,7 @@
         "android.permission.ACTIVITY_RECOGNITION"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#163F2C",
+        "backgroundColor": "#FF7A1A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -60,12 +61,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#EEF1EA",
-          "dark": {
-            "backgroundColor": "#0B120E"
-          },
+          "backgroundColor": "#F7F6F2",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 120
         }
       ],
       [

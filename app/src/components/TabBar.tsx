@@ -2,26 +2,29 @@ import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { HIT, space, usePalette } from '@/theme';
+import { elevation, HIT, radius, space, usePalette } from '@/theme';
 
 import { Icon, type IconName } from './Icon';
 import { Press } from './Press';
 import { Txt } from './Txt';
 
 const TABS: Record<string, { label: string; icon: IconName }> = {
-  index: { label: 'Rastro', icon: 'rastro' },
+  index: { label: 'Inicio', icon: 'rastro' },
   bestiario: { label: 'Bestiario', icon: 'bestiario' },
   atlas: { label: 'Atlas', icon: 'atlas' },
   cuaderno: { label: 'Cuaderno', icon: 'cuaderno' },
 };
 
 /*
- * Barra de pestañas propia: cuatro secciones y, en el centro, el botón de
- * Avistar, que es la acción de la app y no una sección más. Por eso no es una
- * pestaña: abre el visor a pantalla completa por encima de todo.
+ * Barra de pestañas clara: cuatro secciones con icono y nombre siempre
+ * visibles y, en el centro, el botón de Avistar, que es la acción de la app y
+ * no una sección más: una pegatina mandarina con borde blanco que sobresale de
+ * la barra y abre el visor a pantalla completa.
  *
- * Cambiar de pestaña no anima nada (son pares, no una jerarquía, y se hace
- * decenas de veces por sesión).
+ * La pestaña activa se marca con una pastilla azul noche suave detrás del
+ * icono, el icono en tinta y el nombre en negrita: tres señales, ninguna solo
+ * de color. Cambiar de pestaña no anima nada (son pares, no una jerarquía, y
+ * se hace decenas de veces por sesión).
  */
 export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
   const palette = usePalette();
@@ -32,7 +35,6 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
     const meta = TABS[route.name];
     const index = state.routes.findIndex((r) => r.key === route.key);
     const focused = state.index === index;
-    const color = focused ? palette.ink : palette.inkFaint;
     return (
       <Press
         key={route.key}
@@ -44,11 +46,12 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
           if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
         }}>
-        <Icon name={meta.icon} color={color} size={24} />
-        <Txt variant="label" color={color} style={styles.label}>
+        <View style={[styles.pill, focused && { backgroundColor: palette.strongTint }]}>
+          <Icon name={meta.icon} color={focused ? palette.ink : palette.inkFaint} size={24} strokeWidth={focused ? 2.2 : 1.9} />
+        </View>
+        <Txt variant="label" color={focused ? palette.ink : palette.inkFaint} style={[styles.label, !focused && styles.labelIdle]}>
           {meta.label}
         </Txt>
-        <View style={[styles.mark, { backgroundColor: focused ? palette.trailRed : 'transparent' }]} />
       </Press>
     );
   };
@@ -57,6 +60,7 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
     <View
       style={[
         styles.bar,
+        elevation.raised,
         { backgroundColor: palette.surface, borderTopColor: palette.line, paddingBottom: Math.max(insets.bottom, space.sm) },
       ]}>
       {routes.slice(0, half).map(renderTab)}
@@ -64,12 +68,12 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
         <Press
           haptic
           accessibilityRole="button"
-          accessibilityLabel="Avistar un animal"
+          accessibilityLabel="Avistar un animal con la cámara"
           onPress={() => router.push('/avistar')}
-          style={[styles.scan, { backgroundColor: palette.blaze, borderColor: palette.ink }]}>
-          <Icon name="avistar" size={30} color={palette.onBlaze} strokeWidth={2.2} />
+          style={[styles.scan, elevation.raised, { backgroundColor: palette.brand, borderColor: palette.surface }]}>
+          <Icon name="avistar" size={30} color={palette.onBrand} strokeWidth={2.3} />
         </Press>
-        <Txt variant="label" tone="ink" style={styles.scanLabel}>
+        <Txt variant="label" tone="ink" style={styles.label}>
           Avistar
         </Txt>
       </View>
@@ -84,19 +88,21 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: space.sm,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06,
   },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', minHeight: HIT, gap: 3 },
-  label: { fontSize: 11, lineHeight: 13 },
-  mark: { width: 14, height: 3, borderRadius: 1, marginTop: 2 },
-  centerSlot: { width: 84, alignItems: 'center', gap: 4 },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', minHeight: HIT + 8, gap: 2 },
+  pill: { width: 56, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  label: { fontSize: 12, lineHeight: 15 },
+  labelIdle: { fontFamily: 'AtkinsonHyperlegibleNext_500Medium' },
+  centerSlot: { width: 84, alignItems: 'center', gap: 2 },
   scan: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    borderWidth: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -26,
+    marginTop: -30,
   },
-  scanLabel: { fontSize: 11, lineHeight: 13, marginBottom: 5 },
 });

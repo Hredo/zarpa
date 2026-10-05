@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Verdict } from '@/ai/decision';
@@ -11,9 +11,9 @@ import { judgeBreed, speciesModelId, type BreedGuess } from '@/ai/engine';
 import { getSpeciesByIds, listSpecies, type BreedRow, type SpeciesRow } from '@/db/catalog';
 import { EMPTY_FILTERS } from '@/db/query';
 import type { CaptureResult } from '@/lib/capture';
+import { displayName } from '@/lib/speciesName';
 import { discardCapture } from '@/lib/capture';
 import { fmt1 } from '@/lib/format';
-import { GROUP_BY_CODE } from '@/lib/groups';
 import { countryOf, placeName, type Coords } from '@/lib/location';
 import { useJournal } from '@/store/journal';
 import { duration, ease, radius, space, type, usePalette } from '@/theme';
@@ -42,9 +42,10 @@ const LEVEL_ES: Record<string, string> = {
 /*
  * Revisión del disparo.
  *
- * La pegatina entra con una escala de 0,94 a 1 y opacidad, en curva de salida:
- * es el «despegar» del papel. Al fichar, se encoge hacia la esquina del
- * cuaderno. Nada rebota.
+ * Es la revelación del cromo: un halo mandarina se abre detrás de la pegatina
+ * mientras esta entra con escala de 0,9 a 1, giro leve y opacidad, todo en
+ * curva de salida (es el «despegar» del papel). Al fichar, se encoge hacia la
+ * esquina del cuaderno. Nada rebota. Con «reducir movimiento» solo hay fundido.
  *
  * Lo que se afirma depende del veredicto:
  *   - especie fijada → «Es un …», se ficha como verificado;
@@ -117,9 +118,18 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
     transform: [
       { translateX: leave.get() * 120 },
       { translateY: leave.get() * 340 },
-      { scale: (0.94 + 0.06 * enter.get()) * (1 - 0.7 * leave.get()) },
-      { rotate: `${-3 + 3 * enter.get() - 8 * leave.get()}deg` },
+      { scale: (reduced ? 1 : 0.9 + 0.1 * enter.get()) * (1 - 0.7 * leave.get()) },
+      { rotate: reduced ? '0deg' : `${-4 + 4 * enter.get() - 8 * leave.get()}deg` },
     ],
+  }));
+  // El halo se abre un poco más despacio que la pegatina y se queda como luz de fondo.
+  const halo = useSharedValue(reduced ? 1 : 0);
+  useEffect(() => {
+    halo.set(withDelay(120, withTiming(1, { duration: duration.reveal, easing: ease.out })));
+  }, [halo]);
+  const haloStyle = useAnimatedStyle(() => ({
+    opacity: halo.get() * 0.42 * (1 - leave.get()),
+    transform: [{ scale: reduced ? 1 : 0.6 + 0.4 * halo.get() }],
   }));
 
   const shownResults = searching && q.trim().length >= 2 ? results : [];
@@ -161,41 +171,49 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
   };
 
   const headline = (() => {
-    if (verified && chosenRow) return chosenRow.name_es ?? chosenRow.name_en ?? chosenRow.sci;
+    if (verified && chosenRow) return displayName(chosenRow).name;
     if (verdict?.level && verdict.level !== 'species' && verdict.taxon) return `Es de ${LEVEL_ES[verdict.level]} ${verdict.taxon}`;
-    return 'No puedo asegurar qué es';
+    return 'Necesito tu ayuda';
   })();
 
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.forestDeep }]}>
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.strongDeep }]}>
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxl }}>
-        <Animated.View style={[styles.stickerWrap, stickerStyle]}>
-          <Image source={capture.stickerUri ?? capture.cropUri} style={styles.sticker} contentFit="contain" />
-        </Animated.View>
+        <View style={styles.stickerWrap}>
+          <Animated.View pointerEvents="none" style={[styles.halo, { backgroundColor: palette.brand }, haloStyle]} />
+          <Animated.View style={stickerStyle}>
+            <Image source={capture.stickerUri ?? capture.cropUri} style={styles.sticker} contentFit="contain" />
+          </Animated.View>
+        </View>
 
         <View style={styles.body}>
-          <Txt variant="title" tone="onForest">
+          <Txt
+            variant="title"
+            tone="onStrong"
+            style={verified && chosenRow && displayName(chosenRow).isSci ? { fontStyle: 'italic' } : undefined}>
             {headline}
           </Txt>
           {verified && chosenRow ? (
             <View style={styles.row}>
-              <Txt variant="sci" tone="onForestSoft">
-                {chosenRow.sci}
+              <Txt variant="sci" tone="onStrongSoft" numberOfLines={1} style={{ flexShrink: 1 }}>
+                {displayName(chosenRow).isSci ? displayName(chosenRow).sub : chosenRow.sci}
               </Txt>
               <TrailMark tier={chosenRow.rarity} />
             </View>
           ) : null}
-          <Txt variant="small" tone="onForestSoft" style={{ marginTop: space.sm }}>
+          <Txt variant="small" tone="onStrongSoft" style={{ marginTop: space.sm }}>
             {verified
-              ? `Reconocida por la IA con un ${fmt1((probOf.get(chosen!) ?? 0) * 100)} % de probabilidad, por encima del umbral con el que acierta el 95 % de las veces.`
-              : verdict
-                ? 'La IA no llega al nivel de seguridad que exige el fichaje automático. Elige tú la especie si la conoces: quedará en tu cuaderno como «sin verificar».'
-                : 'Sin reconocimiento de especies en este móvil todavía. Elige la especie: quedará como «sin verificar».'}
+              ? `La IA la reconoce con un ${fmt1((probOf.get(chosen!) ?? 0) * 100)} % de probabilidad, por encima del umbral con el que acierta el 95 % de las veces.`
+              : verdict?.level && verdict.level !== 'species'
+                ? 'La IA no está lo bastante segura para decir la especie. Elige la que creas entre las candidatas: quedará como «sin verificar».'
+                : verdict
+                  ? 'La IA no ha podido reconocerlo con seguridad. Si sabes qué es, búscalo abajo: quedará como «sin verificar».'
+                  : 'Este móvil aún no tiene el reconocimiento de especies. Elige tú la especie: quedará como «sin verificar».'}
           </Txt>
 
           {top.length > 0 && (
             <View style={{ marginTop: space.lg, gap: space.sm }}>
-              <Txt variant="label" tone="onForestSoft">
+              <Txt variant="label" tone="onStrongSoft">
                 Candidatas de la IA
               </Txt>
               {top.map((s) => (
@@ -240,8 +258,8 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
             </View>
           ) : (
             <Press onPress={() => setSearching(true)} style={styles.linkBtn}>
-              <Icon name="search" size={18} color={palette.onForest} />
-              <Txt variant="bodyStrong" tone="onForest">
+              <Icon name="search" size={18} color={palette.onStrong} />
+              <Txt variant="bodyStrong" tone="onStrong">
                 Buscar otra especie
               </Txt>
             </Press>
@@ -253,20 +271,20 @@ export function CaptureReview({ capture, coords, candidates, onRetry }: Props) {
             onPress={save}
             style={[
               styles.primary,
-              { backgroundColor: chosen ? palette.blaze : 'rgba(255,255,255,0.18)', borderColor: palette.ink },
+              { backgroundColor: chosen ? palette.brand : 'rgba(255, 255, 255, 0.18)' },
             ]}>
-            <Txt variant="bodyStrong" tone={chosen ? 'onBlaze' : 'onForestSoft'}>
-              {saving ? 'Pegando…' : verified ? 'Fichar en mi cuaderno' : 'Guardar sin verificar'}
+            <Txt variant="bodyStrong" tone={chosen ? 'onBrand' : 'onStrongSoft'}>
+              {saving ? 'Pegando en tu álbum…' : verified ? 'Fichar en mi cuaderno' : 'Guardar como sin verificar'}
             </Txt>
           </Press>
           <View style={styles.secondaryRow}>
             <Press onPress={onRetry} style={styles.secondary}>
-              <Txt variant="bodyStrong" tone="onForest">
-                Repetir foto
+              <Txt variant="bodyStrong" tone="onStrong">
+                Repetir la foto
               </Txt>
             </Press>
             <Press onPress={discard} style={styles.secondary}>
-              <Txt variant="bodyStrong" tone="onForestSoft">
+              <Txt variant="bodyStrong" tone="onStrongSoft">
                 Descartar
               </Txt>
             </Press>
@@ -287,20 +305,24 @@ function Option({ species, p, selected, onPress }: { species: SpeciesRow; p: num
         styles.option,
         {
           backgroundColor: selected ? palette.surface : 'rgba(255,255,255,0.06)',
-          borderColor: selected ? palette.blaze : 'rgba(255,255,255,0.16)',
+          borderColor: selected ? palette.brand : 'rgba(255,255,255,0.16)',
         },
       ]}>
       <Image source={listThumb(species.img)} style={styles.optionImg} contentFit="cover" />
       <View style={styles.fill}>
-        <Txt variant="bodyStrong" tone={selected ? 'ink' : 'onForest'} numberOfLines={1}>
-          {species.name_es ?? species.name_en ?? species.sci}
+        <Txt
+          variant="bodyStrong"
+          tone={selected ? 'ink' : 'onStrong'}
+          numberOfLines={1}
+          style={displayName(species).isSci ? { fontStyle: 'italic' } : undefined}>
+          {displayName(species).name}
         </Txt>
-        <Txt variant="sci" tone={selected ? 'soft' : 'onForestSoft'} numberOfLines={1}>
-          {species.sci} · {GROUP_BY_CODE[species.grp]?.singular}
+        <Txt variant="sci" tone={selected ? 'soft' : 'onStrongSoft'} numberOfLines={1}>
+          {displayName(species).isSci ? displayName(species).sub : `${species.sci} · ${displayName(species).group}`}
         </Txt>
       </View>
       {p !== null && (
-        <Txt variant="data" tone={selected ? 'ink' : 'onForestSoft'}>
+        <Txt variant="data" tone={selected ? 'ink' : 'onStrongSoft'}>
           {fmt1(p * 100)} %
         </Txt>
       )}
@@ -310,7 +332,8 @@ function Option({ species, p, selected, onPress }: { species: SpeciesRow; p: num
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  stickerWrap: { alignItems: 'center', paddingHorizontal: space.xl },
+  stickerWrap: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
+  halo: { position: 'absolute', width: 300, height: 300, borderRadius: 150 },
   sticker: { width: '100%', aspectRatio: 1, maxHeight: 340 },
   body: { paddingHorizontal: space.lg, marginTop: space.lg },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.xs },
@@ -319,7 +342,7 @@ const styles = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 48, paddingHorizontal: space.md, borderRadius: radius.md },
   input: { flex: 1, paddingVertical: 0 },
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.lg },
-  primary: { marginTop: space.lg, height: 54, borderRadius: radius.pill, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  primary: { marginTop: space.lg, height: 56, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   secondaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: space.sm },
   secondary: { padding: space.md },
 });

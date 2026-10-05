@@ -3,6 +3,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
+import { palette } from '@/theme';
+
 /*
  * Mapa del Atlas: MapLibre GL JS dentro de un WebView, igual que en el TFG
  * (gratis, sin clave de API, teselas de OpenFreeMap) y con sus mismos cierres
@@ -39,6 +41,13 @@ export type MapTap = { lng: number; lat: number; zoom: number; hits: { key: numb
 export type MapCanvasHandle = {
   flyTo: (lng: number, lat: number, zoom: number) => void;
   fitWorld: () => void;
+  /**
+   * Encuadra la distribución de una especie (clave de GBIF) ya pintada como
+   * capa: vuela al mundo, espera a que carguen sus hexágonos y ajusta el zoom a
+   * donde se concentran sus observaciones, sin que un avistamiento suelto en
+   * otro continente lo estire. Si es cosmopolita, se queda en el mundo.
+   */
+  fitToSpecies: (key: number) => void;
 };
 
 type Props = {
@@ -46,6 +55,8 @@ type Props = {
   layers: MapLayer[];
   pins: MapPin[];
   onTap?: (tap: MapTap) => void;
+  /** El mapa terminó de cargar: ya acepta capas y órdenes de encuadre. */
+  onReady?: () => void;
   initial?: { lng: number; lat: number; zoom: number };
 };
 
@@ -55,7 +66,7 @@ function html(nonce: string, dark: boolean, initial: { lng: number; lat: number;
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://unpkg.com; style-src 'unsafe-inline' https://unpkg.com; img-src data: blob: https://*.openfreemap.org https://s3.amazonaws.com https://api.gbif.org; connect-src https://tiles.openfreemap.org https://*.openfreemap.org https://s3.amazonaws.com https://api.gbif.org; font-src https://tiles.openfreemap.org; worker-src blob:; child-src blob:">
 <link rel="stylesheet" href="${MAPLIBRE_CSS}" integrity="${MAPLIBRE_CSS_SRI}" crossorigin="anonymous">
-<style>html,body,#map{margin:0;height:100%;background:${dark ? '#0B120E' : '#E2E7DC'}}.maplibregl-ctrl-attrib{font:11px sans-serif}</style>
+<style>html,body,#map{margin:0;height:100%;background:${dark ? palette.strongDeep : palette.surfaceAlt}}.maplibregl-ctrl-attrib{font:11px sans-serif}</style>
 <script nonce="${nonce}" src="${MAPLIBRE_JS}" integrity="${MAPLIBRE_JS_SRI}" crossorigin="anonymous"></script>
 </head><body><div id="map"></div>
 <script nonce="${nonce}">
@@ -64,7 +75,7 @@ function html(nonce: string, dark: boolean, initial: { lng: number; lat: number;
   if (!window.maplibregl) { post({type:'error', message:'maplibre'}); return; }
   var map = new maplibregl.Map({ container:'map', style:${JSON.stringify(style)}, center:[${initial.lng},${initial.lat}], zoom:${initial.zoom}, attributionControl:{compact:true}, dragRotate:false, pitchWithRotate:false });
   map.touchZoomRotate.disableRotation();
-  var layers = {};
+  var layers = {}; var fitToken = 0;
   var GBIF = 'https://api.gbif.org/v2/map/occurrence/density/{z}/{x}/{y}.mvt?srs=EPSG:3857&basisOfRecord=HUMAN_OBSERVATION&taxonKey=';
   function firstSymbol(){ var ls = map.getStyle().layers; for (var i=0;i<ls.length;i++){ if (ls[i].type==='symbol') return ls[i].id; } return undefined; }
   function color(h){ return 'hsl('+h+', 72%, '+(${dark ? 58 : 42})+'%)'; }
@@ -98,13 +109,44 @@ function html(nonce: string, dark: boolean, initial: { lng: number; lat: number;
     },
     setPins: function(geo){ var s = map.getSource('pins'); if (s) s.setData(geo); },
     flyTo: function(lng,lat,z){ map.flyTo({ center:[lng,lat], zoom:z, duration:900, essential:true }); },
-    fitWorld: function(){ map.flyTo({ center:[10,25], zoom:1.3, duration:900 }); }
+    fitWorld: function(){ map.flyTo({ center:[10,25], zoom:1.3, duration:900 }); },
+    fitToSpecies: function(key){
+      var token = ++fitToken, tries = 0, sid = 'sp'+key+'h';
+      map.easeTo({ center:[10,25], zoom:1.3, duration:600 });
+      function quantile(items, q){
+        var tot = 0; items.forEach(function(i){ tot += i.w; });
+        var acc = 0;
+        for (var i=0;i<items.length;i++){ acc += items[i].w; if (acc >= tot*q) return items[i].v; }
+        return items[items.length-1].v;
+      }
+      function attempt(){
+        if (token !== fitToken) return;
+        if (!map.getSource(sid) || !map.isSourceLoaded(sid)) { if (++tries < 40) setTimeout(attempt, 300); return; }
+        var feats = map.querySourceFeatures(sid, { sourceLayer:'occurrence' });
+        var xs = [], ys = [];
+        feats.forEach(function(f){
+          var g = f.geometry; if (!g || !g.coordinates) return;
+          var ring = g.type === 'Polygon' ? g.coordinates[0] : g.type === 'MultiPolygon' ? g.coordinates[0][0] : null;
+          if (!ring || !ring.length) return;
+          var cx = 0, cy = 0; ring.forEach(function(c){ cx += c[0]; cy += c[1]; });
+          var w = Math.max(1, Number(f.properties && f.properties.total) || 1);
+          xs.push({ v:cx/ring.length, w:w }); ys.push({ v:cy/ring.length, w:w });
+        });
+        if (!xs.length) { if (++tries < 40) setTimeout(attempt, 300); return; }
+        xs.sort(function(a,b){ return a.v-b.v; }); ys.sort(function(a,b){ return a.v-b.v; });
+        var w0 = quantile(xs, 0.015), w1 = quantile(xs, 0.985), s0 = quantile(ys, 0.015), s1 = quantile(ys, 0.985);
+        if (w1 - w0 > 300) return;
+        var padLng = Math.max(1, (w1-w0)*0.06), padLat = Math.max(1, (s1-s0)*0.06);
+        map.fitBounds([[w0-padLng, Math.max(-85, s0-padLat)],[w1+padLng, Math.min(85, s1+padLat)]], { padding:{ top:250, bottom:190, left:36, right:36 }, maxZoom:7, duration:1100 });
+      }
+      setTimeout(attempt, 700);
+    }
   };
   map.on('load', function(){
     map.addSource('terrain', { type:'raster-dem', tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding:'terrarium', tileSize:256, maxzoom:14, attribution:'Relieve: Mapzen Terrain Tiles (AWS Open Data)' });
-    map.addLayer({ id:'relief', type:'hillshade', source:'terrain', paint:{ 'hillshade-exaggeration':0.35, 'hillshade-shadow-color':${dark ? "'#000000'" : "'#3E5246'"}, 'hillshade-highlight-color':${dark ? "'#2A3A30'" : "'#FFFFFF'"} } }, firstSymbol());
+    map.addLayer({ id:'relief', type:'hillshade', source:'terrain', paint:{ 'hillshade-exaggeration':0.35, 'hillshade-shadow-color':${dark ? "'#000000'" : `'${palette.inkSoft}'`}, 'hillshade-highlight-color':${dark ? "'#2A3A30'" : "'#FFFFFF'"} } }, firstSymbol());
     map.addSource('pins', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
-    map.addLayer({ id:'pins', type:'circle', source:'pins', paint:{ 'circle-radius':7, 'circle-color':'#F5C400', 'circle-stroke-color':'#0F1A14', 'circle-stroke-width':2 } });
+    map.addLayer({ id:'pins', type:'circle', source:'pins', paint:{ 'circle-radius':7, 'circle-color':'${palette.brand}', 'circle-stroke-color':'${palette.ink}', 'circle-stroke-width':2 } });
     post({type:'ready'});
   });
   map.on('click', function(e){
@@ -120,7 +162,7 @@ function html(nonce: string, dark: boolean, initial: { lng: number; lat: number;
 </script></body></html>`;
 }
 
-export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({ dark, layers, pins, onTap, initial }, ref) {
+export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({ dark, layers, pins, onTap, onReady, initial }, ref) {
   const web = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
   // El HTML se genera una vez por montaje (cambiar de tema remonta el mapa):
@@ -138,6 +180,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({
   useImperativeHandle(ref, () => ({
     flyTo: (lng, lat, zoom) => call('flyTo', lng, lat, zoom),
     fitWorld: () => call('fitWorld'),
+    fitToSpecies: (key) => call('fitToSpecies', Math.trunc(key)),
   }));
 
   useEffect(() => {
@@ -159,7 +202,10 @@ export const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas({
     } catch {
       return;
     }
-    if (msg.type === 'ready') setReady(true);
+    if (msg.type === 'ready') {
+      setReady(true);
+      onReady?.();
+    }
     if (msg.type === 'tap' && onTap && typeof msg.lng === 'number' && typeof msg.lat === 'number') {
       onTap({ lng: msg.lng, lat: msg.lat, zoom: Number(msg.zoom) || 0, hits: Array.isArray(msg.hits) ? msg.hits : [] });
     }

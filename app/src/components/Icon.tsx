@@ -1,10 +1,17 @@
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg';
 
 import { usePalette } from '@/theme';
+
+import { PawGlyph } from './Logo';
 
 /*
  * Iconos propios, todos en la misma rejilla de 24 px, trazo de 1,9 y uniones
  * redondeadas. Nada de emojis ni de glifos Unicode haciendo de icono.
+ *
+ * API: `<Icon name="leaf" size={20} color={palette.leaf} />`. Tamaños de la
+ * escala `iconSize` (16 · 20 · 24 · 32). Sin `color` usa la tinta. Los iconos
+ * de grupo se llaman como el código del grupo (`mamifero`, `ave`…), así que
+ * `<Icon name={species.grp} />` funciona directamente.
  */
 
 export type IconName =
@@ -39,6 +46,23 @@ export type IconName =
   | 'image'
   | 'warning'
   | 'shutter'
+  | 'ruler'
+  | 'weight'
+  | 'hourglass'
+  | 'leaf'
+  | 'sun'
+  | 'moon'
+  | 'drop'
+  | 'wave'
+  | 'tree'
+  | 'mountain'
+  | 'egg'
+  | 'heart'
+  | 'heartFilled'
+  | 'star'
+  | 'sparkle'
+  | 'eye'
+  | 'calendar'
   | 'mamifero'
   | 'ave'
   | 'reptil'
@@ -73,15 +97,11 @@ type Stroke = { stroke: string; strokeWidth: number; strokeLinecap: 'round'; str
 function draw(name: IconName, s: Stroke, c: string) {
   switch (name) {
     case 'rastro':
-      // Huella de cánido: cuatro dedos y almohadilla.
+      // La huella del logo, en trazo.
       return (
-        <>
-          <Path {...s} d="M8.2 14.6c.9-1.9 2.2-2.9 3.8-2.9s2.9 1 3.8 2.9c.8 1.8.2 4.1-1.9 4.1-.7 0-1.2-.3-1.9-.3s-1.2.3-1.9.3c-2.1 0-2.7-2.3-1.9-4.1z" />
-          <Circle {...s} cx="6.4" cy="10.2" r="1.6" />
-          <Circle {...s} cx="9.6" cy="6.6" r="1.6" />
-          <Circle {...s} cx="14.4" cy="6.6" r="1.6" />
-          <Circle {...s} cx="17.6" cy="10.2" r="1.6" />
-        </>
+        <G transform="translate(-0.4 0.4) scale(0.248)">
+          <PawGlyph stroke={c} strokeWidth={s.strokeWidth / 0.248} />
+        </G>
       );
     case 'bestiario':
       // Álbum abierto con dos cromos.
@@ -265,15 +285,108 @@ function draw(name: IconName, s: Stroke, c: string) {
       );
     case 'shutter':
       return <Circle {...s} cx="12" cy="12" r="8.5" />;
-    case 'mamifero':
+    case 'ruler':
       return (
         <>
-          <Path {...s} d="M8.2 14.6c.9-1.9 2.2-2.9 3.8-2.9s2.9 1 3.8 2.9c.8 1.8.2 4.1-1.9 4.1-.7 0-1.2-.3-1.9-.3s-1.2.3-1.9.3c-2.1 0-2.7-2.3-1.9-4.1z" />
-          <Circle {...s} cx="6.4" cy="10.2" r="1.6" />
-          <Circle {...s} cx="9.6" cy="6.6" r="1.6" />
-          <Circle {...s} cx="14.4" cy="6.6" r="1.6" />
-          <Circle {...s} cx="17.6" cy="10.2" r="1.6" />
+          <Rect {...s} x="2.8" y="8" width="18.4" height="8" rx="1.6" transform="rotate(-30 12 12)" />
+          <Path {...s} d="M6.5 8v3M9.5 8v4.5M12.5 8v3M15.5 8v4.5M18.5 8v3" transform="rotate(-30 12 12)" />
         </>
+      );
+    case 'weight':
+      return (
+        <>
+          <Path {...s} d="M6.6 8.5h10.8l2.3 11.5H4.3z" />
+          <Circle {...s} cx="12" cy="5.6" r="2.4" />
+        </>
+      );
+    case 'hourglass':
+      return (
+        <>
+          <Path {...s} d="M6.5 3.5h11M6.5 20.5h11" />
+          <Path {...s} d="M7.5 3.5c0 4.2 4.5 5.6 4.5 8.5s-4.5 4.3-4.5 8.5M16.5 3.5c0 4.2-4.5 5.6-4.5 8.5s4.5 4.3 4.5 8.5" />
+        </>
+      );
+    case 'leaf':
+      return (
+        <>
+          <Path {...s} d="M5 19c-.6-7.6 4.2-13.6 14.5-14.5.6 10.3-5.6 15.4-13.4 14.6z" />
+          <Path {...s} d="M5 19c3.2-4.4 6.4-7.4 10-9.6" />
+        </>
+      );
+    case 'sun':
+      return (
+        <>
+          <Circle {...s} cx="12" cy="12" r="4" />
+          <Path {...s} d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" />
+        </>
+      );
+    case 'moon':
+      return <Path {...s} d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z" />;
+    case 'drop':
+      return <Path {...s} d="M12 3.2s6 6.4 6 11a6 6 0 0 1-12 0c0-4.6 6-11 6-11z" />;
+    case 'wave':
+      return (
+        <>
+          <Path {...s} d="M2.8 9.5c1.5-1.4 3.1-1.4 4.6 0s3.1 1.4 4.6 0 3.1-1.4 4.6 0 3.1 1.4 4.6 0" />
+          <Path {...s} d="M2.8 14.5c1.5-1.4 3.1-1.4 4.6 0s3.1 1.4 4.6 0 3.1-1.4 4.6 0 3.1 1.4 4.6 0" />
+        </>
+      );
+    case 'tree':
+      return (
+        <>
+          <Path {...s} d="M12 3c3.6 0 6 2.9 6 6.2 0 3.6-2.7 6-6 6s-6-2.4-6-6C6 5.9 8.4 3 12 3z" />
+          <Path {...s} d="M12 9.5v11.5M9 21h6M12 13.2l2.4-2" />
+        </>
+      );
+    case 'mountain':
+      return (
+        <>
+          <Path {...s} d="M2.5 19.5 9 8.5l4 6.6 2.5-3.6 6 8z" />
+          <Path {...s} d="M7.2 11.6 9 12.6l1.6-1.2" />
+        </>
+      );
+    case 'egg':
+      return <Path {...s} d="M12 3.2c3.4 0 6.2 5.3 6.2 9.6 0 4.2-2.8 7.8-6.2 7.8s-6.2-3.6-6.2-7.8c0-4.3 2.8-9.6 6.2-9.6z" />;
+    case 'heart':
+      return <Path {...s} d="M12 20s-7.8-4.7-7.8-10.3A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.8 2.5C19.8 15.3 12 20 12 20z" />;
+    case 'heartFilled':
+      return (
+        <Path
+          d="M12 20s-7.8-4.7-7.8-10.3A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.8 2.5C19.8 15.3 12 20 12 20z"
+          fill={c}
+          stroke={c}
+          strokeWidth={s.strokeWidth}
+          strokeLinejoin="round"
+        />
+      );
+    case 'star':
+      return <Path {...s} d="M12 3.4l2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.7l-5.4 2.9 1.2-5.9-4.4-4.1 6-.7z" />;
+    case 'sparkle':
+      return (
+        <>
+          <Path {...s} d="M10 3.5c.6 3.8 2.2 5.4 6 6-3.8.6-5.4 2.2-6 6-.6-3.8-2.2-5.4-6-6 3.8-.6 5.4-2.2 6-6z" />
+          <Path {...s} d="M17.8 14.5c.3 1.8 1 2.5 2.7 2.7-1.7.3-2.4 1-2.7 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.2 2.5-.9 2.8-2.7z" />
+        </>
+      );
+    case 'eye':
+      return (
+        <>
+          <Path {...s} d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" />
+          <Circle {...s} cx="12" cy="12" r="3.2" />
+        </>
+      );
+    case 'calendar':
+      return (
+        <>
+          <Rect {...s} x="3.5" y="5" width="17" height="15.5" rx="2.2" />
+          <Path {...s} d="M3.5 10h17M8 3v4M16 3v4" />
+        </>
+      );
+    case 'mamifero':
+      return (
+        <G transform="translate(-0.4 0.4) scale(0.248)">
+          <PawGlyph stroke={c} strokeWidth={s.strokeWidth / 0.248} />
+        </G>
       );
     case 'ave':
       return (

@@ -83,15 +83,15 @@ export function BreedPicker({ speciesId, cc, value, onChange, guesses, sureRid }
     return (
       <View style={[styles.box, { borderColor: 'rgba(255,255,255,0.16)' }]}>
         <View style={styles.fill}>
-          <Txt variant="label" tone="onForestSoft">
+          <Txt variant="label" tone="onStrongSoft">
             Raza
           </Txt>
-          <Txt variant="subheading" tone="onForest" upper>
+          <Txt variant="subheading" tone="onStrong" upper>
             {value.name}
           </Txt>
         </View>
         <Press onPress={() => onChange(null)} accessibilityLabel="Quitar la raza" style={styles.iconBtn}>
-          <Icon name="close" size={18} color={palette.onForest} />
+          <Icon name="close" size={18} color={palette.onStrong} />
         </Press>
       </View>
     );
@@ -100,7 +100,7 @@ export function BreedPicker({ speciesId, cc, value, onChange, guesses, sureRid }
   if (!open && suggestions.length > 0) {
     return (
       <View style={styles.picker}>
-        <Txt variant="label" tone="onForestSoft">
+        <Txt variant="label" tone="onStrongSoft">
           La IA reconoce la raza: con esta seguridad acertó al menos 19 de cada 20 veces en las pruebas. Confírmala tú.
         </Txt>
         {suggestions.map((b) => (
@@ -110,24 +110,24 @@ export function BreedPicker({ speciesId, cc, value, onChange, guesses, sureRid }
             style={[
               styles.option,
               styles.suggestion,
-              { borderColor: b.rid === sureRid ? palette.blaze : 'rgba(255,255,255,0.16)' },
+              { borderColor: b.rid === sureRid ? palette.brand : 'rgba(255,255,255,0.16)' },
             ]}>
             <View style={styles.fill}>
-              <Txt variant="subheading" tone="onForest" upper numberOfLines={1}>
+              <Txt variant="subheading" tone="onStrong" upper numberOfLines={1}>
                 {b.name}
               </Txt>
-              <Txt variant="small" tone="onForestSoft" numberOfLines={1}>
+              <Txt variant="small" tone="onStrongSoft" numberOfLines={1}>
                 {breedSubline(b)}
               </Txt>
             </View>
-            <Txt variant="data" tone="onForestSoft">
+            <Txt variant="data" tone="onStrongSoft">
               {fmt1(b.p * 100)} %
             </Txt>
           </Press>
         ))}
         <Press onPress={() => setOpen(true)} style={styles.link}>
-          <Icon name="search" size={18} color={palette.onForest} />
-          <Txt variant="bodyStrong" tone="onForest">
+          <Icon name="search" size={18} color={palette.onStrong} />
+          <Txt variant="bodyStrong" tone="onStrong">
             Es otra raza
           </Txt>
         </Press>
@@ -138,8 +138,8 @@ export function BreedPicker({ speciesId, cc, value, onChange, guesses, sureRid }
   if (!open) {
     return (
       <Press onPress={() => setOpen(true)} style={styles.link}>
-        <Icon name="plus" size={18} color={palette.onForest} />
-        <Txt variant="bodyStrong" tone="onForest">
+        <Icon name="plus" size={18} color={palette.onStrong} />
+        <Txt variant="bodyStrong" tone="onStrong">
           Añadir la raza (opcional)
         </Txt>
       </Press>
@@ -171,15 +171,15 @@ export function BreedPicker({ speciesId, cc, value, onChange, guesses, sureRid }
             setOpen(false);
           }}
           style={[styles.option, { borderColor: 'rgba(255,255,255,0.16)' }]}>
-          <Txt variant="subheading" tone="onForest" upper numberOfLines={1}>
+          <Txt variant="subheading" tone="onStrong" upper numberOfLines={1}>
             {b.name}
           </Txt>
-          <Txt variant="small" tone="onForestSoft" numberOfLines={1}>
+          <Txt variant="small" tone="onStrongSoft" numberOfLines={1}>
             {breedSubline(b)}
           </Txt>
         </Press>
       ))}
-      <Txt variant="small" tone="onForestSoft">
+      <Txt variant="small" tone="onStrongSoft">
         Solo razas reconocidas oficialmente. Si no la sabes, déjalo vacío.
       </Txt>
     </View>
@@ -189,7 +189,7 @@ export function BreedPicker({ speciesId, cc, value, onChange, guesses, sureRid }
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   box: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.md, padding: space.md, borderRadius: radius.md, borderWidth: 1.5 },
-  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   link: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.md },
   picker: { marginTop: space.md, gap: space.sm },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 48, paddingHorizontal: space.md, borderRadius: radius.md },

@@ -139,13 +139,13 @@ export async function topInCountry(cc: string, limit: number): Promise<(SpeciesR
   );
 }
 
-export type AtlasSpecies = { id: number; sci: string; name_es: string | null; name_en: string | null; gbif: number | null; img: string | null; grp: string };
+export type AtlasSpecies = { id: number; sci: string; name_es: string | null; gbif: number | null; img: string | null; grp: string };
 
 /** Lo que necesita el Atlas de cada especie guardada (su clave de GBIF pinta la capa). */
 export async function getAtlasSpecies(ids: number[]): Promise<AtlasSpecies[]> {
   if (ids.length === 0) return [];
   return catalog().getAllAsync<AtlasSpecies>(
-    'SELECT id, sci, name_es, name_en, gbif, img, grp FROM species WHERE id IN (SELECT value FROM json_each(?))',
+    'SELECT id, sci, name_es, gbif, img, grp FROM species WHERE id IN (SELECT value FROM json_each(?))',
     [JSON.stringify(ids)],
   );
 }

@@ -1,40 +1,66 @@
-import { Text, type TextProps, type TextStyle } from 'react-native';
+import { StyleSheet, Text, type TextProps, type TextStyle } from 'react-native';
 
-import { type Palette, type as typeScale, usePalette } from '@/theme';
+import { fonts, type Palette, type as typeScale, usePalette } from '@/theme';
 
-type Variant = keyof typeof typeScale;
-type Tone = 'ink' | 'soft' | 'faint' | 'onForest' | 'onForestSoft' | 'onBlaze' | 'danger' | 'trailRed';
+export type TxtVariant = keyof typeof typeScale;
+export type TxtTone =
+  | 'ink'
+  | 'soft'
+  | 'faint'
+  | 'brand'
+  | 'onBrand'
+  | 'onStrong'
+  | 'onStrongSoft'
+  | 'onSun'
+  | 'danger'
+  | 'red'
+  | 'sky';
 
-const TONE: Record<Tone, keyof Palette> = {
+const TONE: Record<TxtTone, keyof Palette> = {
   ink: 'ink',
   soft: 'inkSoft',
   faint: 'inkFaint',
-  onForest: 'onForest',
-  onForestSoft: 'onForestSoft',
-  onBlaze: 'onBlaze',
+  brand: 'brandInk',
+  onBrand: 'onBrand',
+  onStrong: 'onStrong',
+  onStrongSoft: 'onStrongSoft',
+  onSun: 'onSun',
   danger: 'danger',
-  trailRed: 'trailRed',
+  red: 'red',
+  sky: 'sky',
 };
 
 export type TxtProps = TextProps & {
-  variant?: Variant;
-  tone?: Tone;
+  variant?: TxtVariant;
+  tone?: TxtTone;
+  /** Color libre (p. ej. `groupColor(g).ink`); gana a `tone`. */
   color?: string;
   align?: TextStyle['textAlign'];
   upper?: boolean;
 };
 
+const DISPLAY = new Set<TxtVariant>(['hero', 'title', 'heading', 'subheading', 'stat']);
+
 /**
  * Texto con la escala tipográfica del sistema.
  *
- * Las variantes de rótulo (Big Shoulders) llevan un respiro a la derecha: en
- * Android las fuentes de expo-font se miden un pelo cortas y la última letra
- * de un rótulo condensado se recortaba (lección del TFG, misma pila).
+ * API: `<Txt variant="title" tone="soft">…</Txt>`.
+ *   variant  hero · title · heading · subheading (Bricolage) · body · bodyStrong
+ *            · sci (cursiva para nombres científicos) · label · small · data ·
+ *            dataLarge (mono, solo medidas) · stat (cifra grande)
+ *   tone     ink · soft · faint · brand · onBrand · onStrong · onStrongSoft ·
+ *            onSun · danger · red · sky
+ *
+ * Los rótulos llevan un respiro a la derecha: en Android las fuentes de
+ * expo-font se miden un pelo cortas y la última letra se recortaba.
  */
 export function Txt({ variant = 'body', tone = 'ink', color, align, upper, style, children, ...rest }: TxtProps) {
   const palette = usePalette();
-  const base = typeScale[variant];
-  const isDisplay = variant === 'hero' || variant === 'title' || variant === 'heading' || variant === 'subheading';
+  const base = typeScale[variant] as TextStyle;
+  // Bricolage no tiene cursiva: Android no la sintetiza e iOS la deforma. Los
+  // nombres científicos piden cursiva, así que pasan a la Atkinson cursiva real.
+  const italic = StyleSheet.flatten(style)?.fontStyle === 'italic';
+  const bold = DISPLAY.has(variant) || variant === 'bodyStrong' || variant === 'label';
   return (
     <Text
       {...rest}
@@ -42,8 +68,9 @@ export function Txt({ variant = 'body', tone = 'ink', color, align, upper, style
         base,
         { color: color ?? palette[TONE[tone]], textAlign: align },
         upper && { textTransform: 'uppercase' },
-        isDisplay && { paddingRight: 2 },
+        DISPLAY.has(variant) && { paddingRight: 2 },
         style,
+        italic && { fontFamily: bold ? fonts.textBoldItalic : fonts.textItalic, fontStyle: 'normal' },
       ]}>
       {children}
     </Text>

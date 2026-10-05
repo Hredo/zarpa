@@ -34,14 +34,25 @@ export function breedSubline(b: BreedRow): string {
   }
 }
 
-export function BreedLine({ breed, onPress, showAuthority }: { breed: BreedRow; onPress: (id: string) => void; showAuthority?: boolean }) {
+export function BreedLine({
+  breed,
+  onPress,
+  showAuthority,
+  tint,
+}: {
+  breed: BreedRow;
+  onPress: (id: string) => void;
+  showAuthority?: boolean;
+  /** Color suave del hueco sin foto (p. ej. el `tint` del grupo). */
+  tint?: string;
+}) {
   const palette = usePalette();
   return (
     <Press
       onPress={() => onPress(breed.id)}
       accessibilityRole="button"
       style={[styles.row, { borderBottomColor: palette.line }]}>
-      <View style={[styles.thumb, { backgroundColor: palette.surfaceAlt }]}>
+      <View style={[styles.thumb, { backgroundColor: tint ?? palette.surfaceAlt }]}>
         {breed.img ? (
           <Image source={expandUrl(breed.img)?.replace('/960px-', '/330px-')} style={styles.thumbImg} contentFit="cover" transition={150} />
         ) : (

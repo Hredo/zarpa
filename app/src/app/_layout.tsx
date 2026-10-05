@@ -10,7 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BootError } from '@/components/BootError';
 import { openDatabases } from '@/db';
 import { useJournal } from '@/store/journal';
-import { usePalette, useIsDark } from '@/theme';
+import { usePalette } from '@/theme';
 import { fontAssets } from '@/theme/fonts';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -19,7 +19,6 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 
 export default function RootLayout() {
   const palette = usePalette();
-  const isDark = useIsDark();
   const [fontsLoaded, fontError] = useFonts(fontAssets);
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState<Error | null>(null);
@@ -43,7 +42,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.fill}>
       <SafeAreaProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <StatusBar style="dark" />
         <Stack
           screenOptions={{
             headerShown: false,
@@ -57,7 +56,9 @@ export default function RootLayout() {
           {/* El visor ocupa toda la pantalla y se cierra hacia abajo, como una
               cámara del sistema: no compite con la navegación de pestañas. */}
           <Stack.Screen name="avistar" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
-          <Stack.Screen name="filtros" options={{ presentation: 'formSheet', sheetGrabberVisible: true, sheetAllowedDetents: [0.6, 0.95] }} />
+          {/* Filtros a pantalla completa con cabecera y pie fijos: una hoja con
+              detents se comía el scroll al llegar al final de la lista. */}
+          <Stack.Screen name="filtros" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', gestureEnabled: false }} />
           <Stack.Screen name="fuentes" />
         </Stack>
       </SafeAreaProvider>
