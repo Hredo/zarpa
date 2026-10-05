@@ -64,10 +64,12 @@ export type SpeciesRow = {
   seq: number;
   rg_obs: number;
   family_sci: string | null;
+  /** Nombre español verificado de la familia («Hormigas»), si lo hay (iNaturalist o Wikidata). */
+  family_es?: string | null;
 };
 
 export const LIST_COLUMNS =
-  's.id, s.sci, s.name_es, s.name_en, s.grp, s.rarity, s.iucn, s.img, s.img_ratio, s.seq, s.rg_obs, s.family_sci';
+  's.id, s.sci, s.name_es, s.name_en, s.grp, s.rarity, s.iucn, s.img, s.img_ratio, s.seq, s.rg_obs, s.family_sci, s.family_es';
 
 /** Convierte el texto del buscador en una consulta FTS5 segura por prefijos. */
 export function ftsQuery(text: string): string | null {

@@ -3,7 +3,7 @@ Etapa · Fotos de iNaturalist con licencia libre vía GBIF, para las especies qu
 
 iNaturalist solo cura ~10 fotos por taxón y, en muchas especies, ninguna es libre. Pero
 GBIF publica todas las observaciones de calidad «investigación» de iNaturalist con la
-licencia de cada foto. Para cada especie sin imagen se piden a GBIF las primeras 30
+licencia de cada foto. Para cada especie sin imagen se piden a GBIF las primeras 6
 observaciones con foto cuya observación sea CC0 o CC BY, y se toma la primera foto
 cuya PROPIA licencia (puede ser distinta de la de la observación) sea CC0, CC BY o
 CC BY-SA, con autor conocido y alojada en iNaturalist (la ficha cita «iNaturalist» como
@@ -57,7 +57,9 @@ def _find_photo(gbif_key: int) -> dict | None:
             "mediaType": "StillImage",
             "license": ["CC0_1_0", "CC_BY_4_0"],
             "datasetKey": "50c9509d-22c7-4a22-a47d-8c48425ef4a7",  # iNaturalist Research-grade Observations
-            "limit": 30,
+            # Seis bastan casi siempre (la búsqueda ya filtra por licencia) y pesan
+            # una quinta parte que treinta: menos carga para GBIF y para la red.
+            "limit": 6,
         },
         # GBIF responde 429 (Retry-After: 3 s) con más de ~3 peticiones a la vez:
         # se respeta y, si sigue sin servir esa especie, se deja para otra tirada.
@@ -80,6 +82,9 @@ def _find_photo(gbif_key: int) -> dict | None:
 
 
 def run() -> None:
+    # Ritmo propio de esta etapa: miles de búsquedas de ocurrencias seguidas. GBIF
+    # responde 429 si se le aprieta; a dos por segundo como mucho no se queja.
+    config.MIN_INTERVAL["api.gbif.org"] = 0.5
     universe_keys = {}
     for g in _read("gbif_taxa.jsonl"):
         if g.get("gbif_key"):
@@ -109,7 +114,7 @@ def run() -> None:
     pending = iter(todo)
     # Cada resultado se escribe en cuanto llega: antes se esperaba a tandas de
     # 120 y una sola petición lenta (60 s × reintentos) paraba la tanda entera.
-    with open(out_path, "a", encoding="utf-8") as fh, ThreadPoolExecutor(max_workers=3) as pool:
+    with open(out_path, "a", encoding="utf-8") as fh, ThreadPoolExecutor(max_workers=2) as pool:
         futures: dict = {}
 
         def submit() -> None:

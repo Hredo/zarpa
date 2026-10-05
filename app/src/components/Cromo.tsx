@@ -56,7 +56,7 @@ function CromoBase({ species, caught, width, onPress }: Props) {
     <Press
       onPress={() => onPress(species.id)}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, ${dn.isSci ? dn.group : dn.sub}${caught ? ', avistada' : ''}`}
+      accessibilityLabel={`${name}, ${dn.sub}${caught ? ', avistada' : ''}`}
       style={[styles.card, elevation.card, { width, backgroundColor: palette.surface }]}>
       <View style={[styles.photo, { height: imgH, backgroundColor: g.tint }]}>
         {species.img ? (
