@@ -14,8 +14,11 @@ import { CATALOG_SCHEMA, catalogUrl, isNewerCatalog, parseManifest, type Catalog
  * la pantalla de arranque). Después, una vez al día y con wifi (o al pulsar
  * «Buscar actualización» en el perfil), mira `c/manifest.json`; si hay un
  * índice más nuevo de su esquema:
- *   1. lo baja a `indice-<versión>.db.part`, primero comprimido y, si el MD5 no
- *      cuadra, sin comprimir;
+ *   1. lo baja a `indice-<versión>.db.part`. Se pide el `indice.db` sin
+ *      comprimir: Hosting lo comprime él solo al servirlo (~15-19 MB por la
+ *      red) y el móvil lo recibe ya descomprimido. El `.gz` del manifiesto no
+ *      sirve: Hosting no deja poner `Content-Encoding` a mano y llegaría
+ *      comprimido al disco;
  *   2. comprueba el MD5 y lo renombra a `indice-<versión>.db`;
  *   3. lo anota en `catalogo-activo.json` y se usa al volver a abrir la app
  *      (cambiarlo en caliente dejaría consultas a medias con la base vieja).
@@ -61,8 +64,16 @@ export class CatalogOffline extends Error {
   }
 }
 
+/**
+ * Carpeta de las bases de SQLite. `defaultDatabaseDirectory` es una ruta
+ * («/data/user/0/…/files/SQLite») y expo-file-system necesita una URI
+ * (`file:///…`): con la ruta a secas, cualquier operación con el fichero falla.
+ */
 export function dbDir(): Directory {
-  return new Directory(SQLite.defaultDatabaseDirectory);
+  const path = SQLite.defaultDatabaseDirectory;
+  const dir = new Directory(path.startsWith('file:') ? path : `file://${path}`);
+  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+  return dir;
 }
 
 /** El índice anotado como activo, si sigue en disco y es del esquema de la app. */
@@ -107,10 +118,10 @@ async function fetchManifest(): Promise<CatalogManifest | null> {
   }
 }
 
-async function downloadVerified(m: CatalogManifest, kind: 'gz' | 'raw', onProgress: (p: number) => void, onVerify: () => void): Promise<File | null> {
+async function downloadVerified(m: CatalogManifest, onProgress: (p: number) => void, onVerify: () => void): Promise<File | null> {
   const part = new File(dbDir(), `${INDEX_PREFIX}${m.version}.db.part`);
   if (part.exists) part.delete();
-  const task = new DownloadTask(catalogUrl(m.files[kind].path), part, {
+  const task = new DownloadTask(catalogUrl(m.files.raw.path), part, {
     // Los bytes escritos son ya los descomprimidos: se comparan con el tamaño final.
     onProgress: ({ bytesWritten }) => onProgress(Math.min(0.99, bytesWritten / m.size)),
   });
@@ -127,8 +138,9 @@ async function downloadVerified(m: CatalogManifest, kind: 'gz' | 'raw', onProgre
 
 /** Baja, comprueba e instala el índice del manifiesto; queda anotado como activo. */
 async function install(m: CatalogManifest, onProgress: (p: number) => void, onVerify: () => void): Promise<ActiveCatalog> {
-  const file = (await downloadVerified(m, 'gz', onProgress, onVerify)) ?? (await downloadVerified(m, 'raw', onProgress, onVerify));
-  if (!file) throw new Error('El catálogo descargado no supera la comprobación');
+  // Un segundo intento si la primera descarga llega dañada (se corta, proxy…).
+  const file = (await downloadVerified(m, onProgress, onVerify)) ?? (await downloadVerified(m, onProgress, onVerify));
+  if (!file) throw new Error('El catálogo descargado no supera la comprobación (MD5)');
   const name = `${INDEX_PREFIX}${m.version}.db`;
   const dest = new File(dbDir(), name);
   if (dest.exists) dest.delete();
@@ -143,12 +155,23 @@ async function install(m: CatalogManifest, onProgress: (p: number) => void, onVe
     file: name,
     md5: m.md5,
   };
-  new File(dbDir(), ACTIVE_FILE).write(JSON.stringify(info));
+  const active = new File(dbDir(), ACTIVE_FILE);
+  if (!active.exists) active.create();
+  active.write(JSON.stringify(info));
   return info;
 }
 
-function isNetworkError(e: unknown): boolean {
-  return e instanceof TypeError || (e instanceof Error && /network|fetch|abort|timeout|connect|host/i.test(e.message));
+/**
+ * ¿Falló por falta de red? Solo si el sistema dice que no hay conexión o el
+ * error es de los de red (fetch sin red, tiempo agotado, servidor
+ * inalcanzable). Cualquier otro error se enseña tal cual: decir «sin
+ * conexión» cuando no es eso deja a la persona sin saber qué pasa.
+ */
+async function isOffline(e: unknown): Promise<boolean> {
+  const net = await Network.getNetworkStateAsync().catch(() => null);
+  if (net && (net.isConnected === false || net.isInternetReachable === false)) return true;
+  const msg = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+  return /Network request failed|AbortError|timed? ?out|Unable to resolve host|Failed to connect|UnknownHost|ConnectException|SocketTimeout/i.test(msg);
 }
 
 /**
@@ -160,11 +183,12 @@ export async function installLatestCatalog(onProgress: (p: number, phase: 'downl
   try {
     m = await fetchManifest();
   } catch (e) {
-    if (isNetworkError(e)) throw new CatalogOffline();
+    if (await isOffline(e)) throw new CatalogOffline();
     throw e;
   }
   if (!m) throw new Error('No hay catálogo publicado');
   if (m.schema !== CATALOG_SCHEMA) throw new Error('El catálogo publicado es de otra versión de la app: actualiza Zarpa');
+  // Lo que viaja por la red es el índice comprimido: el tamaño del .gz es una buena estimación.
   const total = m.files.gz.size;
   try {
     return await install(
@@ -173,7 +197,7 @@ export async function installLatestCatalog(onProgress: (p: number, phase: 'downl
       () => onProgress(1, 'verifying', total),
     );
   } catch (e) {
-    if (isNetworkError(e)) throw new CatalogOffline();
+    if (await isOffline(e)) throw new CatalogOffline();
     throw e;
   }
 }
@@ -238,7 +262,7 @@ async function check({ force = false }: { force?: boolean }): Promise<void> {
   } catch (e) {
     useCatalogUpdate.setState({
       phase: 'error',
-      error: isNetworkError(e) ? 'Sin conexión estable. Se reintentará.' : 'No se pudo actualizar el catálogo.',
+      error: (await isOffline(e)) ? 'Sin conexión estable. Se reintentará.' : `No se pudo actualizar el catálogo: ${e instanceof Error ? e.message : String(e)}`,
     });
   }
 }
