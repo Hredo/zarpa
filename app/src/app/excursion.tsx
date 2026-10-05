@@ -269,7 +269,7 @@ function PlanView({ bottom }: { bottom: number }) {
               </>
             )}
 
-            <OfflineSection coords={coords} place={place} imgs={res ? scored.map((c) => c.img) : []} />
+            <OfflineSection coords={coords} place={place} imgs={res ? scored.map((c) => c.img) : []} ids={res ? scored.map((c) => c.id) : []} />
           </>
         )}
       </ScrollView>

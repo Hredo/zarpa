@@ -33,7 +33,7 @@ STAGES = [
     "obs_photos",
     "rank_names",
     "build",
-    "cloud",
+    "hosting",
 ]
 
 

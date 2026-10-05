@@ -43,9 +43,9 @@ Thumbs.db
 .env.*
 !.env.example
 
-# El catálogo se genera con tools/ (`uv run python -m zarpa_data build`) y pesa
-# decenas de MB: no se versiona en git; viaja con cada APK y en las releases.
-app/assets/db/*.db
+# El catálogo se genera con tools/ (tools/out/hosting) y se sirve desde Firebase
+# Hosting: ni va en la app ni en git.
+app/assets/db/
 
 # Modelo de especies (~90 MB) e índice: los genera tools/zarpa_models (export_pte,
 # build_index, publish) y viajan con cada APK, no en git.

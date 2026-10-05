@@ -5,7 +5,6 @@ description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
     "babel>=2.18.0",
-    "google-cloud-storage>=3.16.0",
     "httpx>=0.28.1",
     "openpyxl>=3.1.5",
 ]

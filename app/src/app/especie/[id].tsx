@@ -357,6 +357,14 @@ export default function Ficha() {
             <View style={styles.credit}>
               <PhotoCredit image={images[page]} onOpen={(url) => WebBrowser.openBrowserAsync(url)} />
             </View>
+            {!sp.complete ? (
+              <View style={[styles.offline, { backgroundColor: palette.surfaceAlt, borderColor: palette.line }]} accessibilityLiveRegion="polite">
+                <Icon name="globe" size={18} color={palette.inkSoft} />
+                <Txt variant="small" tone="soft" style={styles.flex1}>
+                  Sin conexión: la descripción, las fotos y los países de esta ficha se verán cuando vuelva la red.
+                </Txt>
+              </View>
+            ) : null}
             <View style={styles.actionsRow}>
               <ShareCromoButton species={sp} image={images[page] ?? images[0] ?? null} />
               <Press
@@ -762,6 +770,8 @@ function cityList(cities: City[], total: number): string {
 }
 
 const styles = StyleSheet.create({
+  offline: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: radius.md, borderWidth: 1, marginTop: space.sm },
+  flex1: { flex: 1 },
   fill: { flex: 1 },
   flex: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },

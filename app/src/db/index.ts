@@ -1,22 +1,20 @@
-import { Directory } from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
 
-import { CATALOG_ASSET, CATALOG_BUILT_AT, CATALOG_SCHEMA, CATALOG_SPECIES, CATALOG_VERSION } from './catalogAsset';
-import { pickCatalog, type CatalogInfo } from './catalogCloud';
-import { forgetDownloadedCatalog, readDownloadedCatalog, setInstalledCatalog } from './catalogUpdate';
+import type { CatalogInfo } from './catalogRemote';
+import { dbDir, forgetActiveCatalog, INDEX_PREFIX, installLatestCatalog, readActiveCatalog, setInstalledCatalog, type ActiveCatalog } from './catalogUpdate';
 import { migrateJournal } from './journal';
+
+export { CatalogOffline } from './catalogUpdate';
 
 /*
  * Dos bases de datos con vidas distintas:
  *
- *   - **Catálogo** (`catalogo-<versión>.db`): la genera `tools/` desde las
- *     fuentes oficiales y viaja dentro de la app. Es de solo lectura. El nombre
- *     lleva la versión para que una actualización de la app traiga el catálogo
- *     nuevo sin tocar el del usuario: se importa el fichero nuevo y se borran
- *     los viejos. Si el nombre fuera fijo, `importDatabaseFromAssetAsync` vería
- *     que ya existe y seguiría usando el antiguo para siempre.
- *     Si Cloud Storage tiene uno más nuevo (`catalogUpdate.ts`), se baja y se
- *     abre ese en el siguiente arranque; el de la app queda de respaldo.
+ *   - **Catálogo**: vive en Firebase Hosting (lo publica `tools/ … hosting.py`).
+ *     En el móvil solo hay un índice ligero (`indice-<versión>.db`, ~45 MB) para
+ *     buscar, filtrar y ordenar sin red; se baja la primera vez que se abre la
+ *     app. Las fichas completas y las listas por país se piden al usarlas y se
+ *     guardan en el propio índice (`catalogDetail.ts`). Si hay un índice más
+ *     nuevo, se baja y se usa en el siguiente arranque (`catalogUpdate.ts`).
  *   - **Cuaderno** (`cuaderno.db`): lo que hace el usuario (avistamientos,
  *     pegatinas, especies guardadas). Nunca se sobrescribe; evoluciona con
  *     migraciones numeradas (`PRAGMA user_version`).
@@ -24,70 +22,71 @@ import { migrateJournal } from './journal';
 
 let catalogDb: SQLite.SQLiteDatabase | null = null;
 let journalDb: SQLite.SQLiteDatabase | null = null;
+let current: ActiveCatalog | null = null;
 
-const CATALOG_PREFIX = 'catalogo-';
+/** Prefijo del catálogo completo que llevaban dentro las versiones anteriores de la app. */
+const OLD_PREFIX = 'catalogo-';
 
-const BUNDLED: CatalogInfo = {
-  version: CATALOG_VERSION,
-  schema: CATALOG_SCHEMA,
-  built_at: CATALOG_BUILT_AT,
-  species: CATALOG_SPECIES,
-  source: 'app',
-};
+export type BootProgress = { phase: 'downloading' | 'verifying'; progress: number; total: number };
 
-let current: CatalogInfo = BUNDLED;
-
-/** Catálogo abierto: versión, fecha, nº de especies y si es el de la app o uno bajado. */
+/** Índice abierto: versión, fecha, nº de especies y trozos de las fichas. */
 export function catalogInfo(): CatalogInfo {
+  if (!current) throw new Error('El catálogo aún no está abierto');
   return current;
 }
 
-async function openBundled(): Promise<SQLite.SQLiteDatabase> {
-  const name = `${CATALOG_PREFIX}${CATALOG_VERSION}.db`;
-  await SQLite.importDatabaseFromAssetAsync(name, { assetId: CATALOG_ASSET });
-  const db = await SQLite.openDatabaseAsync(name);
-  current = BUNDLED;
-  await removeStaleCatalogs(name);
+async function openIndex(info: ActiveCatalog): Promise<SQLite.SQLiteDatabase> {
+  const db = await SQLite.openDatabaseAsync(info.file);
+  // Una consulta de verdad: un fichero dañado no debe dejar la app sin catálogo.
+  await db.getFirstAsync('SELECT id FROM species LIMIT 1');
   return db;
 }
 
-export async function openDatabases(): Promise<void> {
-  if (catalogDb && journalDb) return;
-
-  const downloaded = pickCatalog(BUNDLED, readDownloadedCatalog(), CATALOG_SCHEMA);
-  if (downloaded) {
-    try {
-      const db = await SQLite.openDatabaseAsync(downloaded.file);
-      // Una consulta de verdad: un fichero dañado no debe dejar la app sin catálogo.
-      await db.getFirstAsync('SELECT id FROM species LIMIT 1');
-      catalogDb = db;
-      current = downloaded;
-      await removeStaleCatalogs(downloaded.file);
-    } catch {
-      forgetDownloadedCatalog();
-      catalogDb = await openBundled();
-    }
-  } else {
-    catalogDb = await openBundled();
+/**
+ * Abre el cuaderno y el catálogo. Si el móvil aún no tiene índice (primer
+ * arranque, o uno dañado), lo baja de Hosting informando del progreso; sin red
+ * lanza `CatalogOffline` y el arranque ofrece reintentar.
+ */
+export async function openDatabases(onProgress?: (p: BootProgress) => void): Promise<void> {
+  if (!journalDb) {
+    journalDb = await SQLite.openDatabaseAsync('cuaderno.db');
+    await migrateJournal(journalDb);
   }
-  setInstalledCatalog(current);
+  if (catalogDb) return;
 
-  journalDb = await SQLite.openDatabaseAsync('cuaderno.db');
-  await migrateJournal(journalDb);
+  let info = readActiveCatalog();
+  let db: SQLite.SQLiteDatabase | null = null;
+  if (info) {
+    try {
+      db = await openIndex(info);
+    } catch {
+      forgetActiveCatalog();
+      info = null;
+    }
+  }
+  if (!info || !db) {
+    info = await installLatestCatalog((progress, phase, total) => onProgress?.({ phase, progress, total }));
+    db = await openIndex(info);
+  }
+  catalogDb = db;
+  current = info;
+  setInstalledCatalog(info);
+  removeStaleCatalogs(info.file);
 }
 
-/** Borra catálogos de versiones anteriores; ocupan decenas de MB cada uno. */
-async function removeStaleCatalogs(keep: string): Promise<void> {
+/**
+ * Borra índices de versiones anteriores y el catálogo completo que traían las
+ * versiones viejas de la app (166 MB). Cada uno ocupa decenas de MB.
+ */
+function removeStaleCatalogs(keep: string): void {
   try {
-    const dir = new Directory(SQLite.defaultDatabaseDirectory);
-    for (const entry of dir.list()) {
+    for (const entry of dbDir().list()) {
       const file = entry.name;
-      // Se borran también las descargas a medias (`.part`) y el catálogo de la app
-      // cuando se usa uno bajado (vuelve a importarse si hiciera falta).
-      if (file.startsWith(CATALOG_PREFIX) && file !== keep && file !== 'catalogo-activo.json' && !file.endsWith('-journal') && !file.endsWith('-wal') && !file.endsWith('-shm')) {
-        if (file.endsWith('.part')) entry.delete();
-        else await SQLite.deleteDatabaseAsync(file).catch(() => {});
-      }
+      const ours = file.startsWith(INDEX_PREFIX) || (file.startsWith(OLD_PREFIX) && file !== 'catalogo-activo.json');
+      if (!ours || file === keep || file.startsWith(`${keep}-`)) continue;
+      // Ficheros de la base (con sus -wal/-shm/-journal) y descargas a medias.
+      if (file.endsWith('.part') || file.endsWith('-wal') || file.endsWith('-shm') || file.endsWith('-journal')) entry.delete();
+      else void SQLite.deleteDatabaseAsync(file).catch(() => entry.delete());
     }
   } catch {
     // Limpiar es una mejora, no una condición para arrancar.
@@ -102,4 +101,9 @@ export function catalog(): SQLite.SQLiteDatabase {
 export function journal(): SQLite.SQLiteDatabase {
   if (!journalDb) throw new Error('El cuaderno aún no está abierto');
   return journalDb;
+}
+
+/** ¿Está abierto el catálogo? (las tareas en segundo plano pueden arrancar sin red). */
+export function catalogReady(): boolean {
+  return catalogDb !== null;
 }

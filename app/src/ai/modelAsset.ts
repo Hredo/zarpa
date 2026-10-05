@@ -4,7 +4,7 @@
 // especies) sobre 3430 fotos verificadas de 1167 especies que el modelo no vio al entrenar.
 import type { BreedModel, SpeciesModel } from './config';
 
-// Como en catalogAsset.ts: los `require` de recursos, en constantes de primer nivel.
+// Los `require` de recursos, en constantes de primer nivel (Metro los resuelve al empaquetar).
 const ENCODER: number = require('../../assets/models/bioclip_int8.pte');
 const INDEX: number = require('../../assets/models/species_index.bin');
 

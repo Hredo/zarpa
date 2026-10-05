@@ -22,6 +22,7 @@ import {
   tilesForArea,
   type OfflineZone,
 } from '@/lib/offline';
+import { keepSpecies } from '@/db/catalogDetail';
 import { radius, space, usePalette } from '@/theme';
 
 type Props = {
@@ -29,6 +30,8 @@ type Props = {
   place: string | null;
   /** Fotos (miniaturas del catálogo) de las especies de la zona. */
   imgs: (string | null)[];
+  /** Especies de la zona: sus fichas se guardan para abrirlas sin red. */
+  ids: number[];
 };
 
 const MAX_PHOTOS = 60;
@@ -37,10 +40,10 @@ type Stage = 'idle' | 'photos' | 'map' | 'done';
 
 /**
  * «Descargar esta zona»: precarga las fotos de las especies de alrededor en la
- * caché de expo-image y las teselas del mapa base en la del navegador del
- * mapa. Muestra el tamaño estimado antes de empezar y se puede cancelar.
+ * caché de expo-image, sus fichas en el catálogo y las teselas del mapa base
+ * en la del navegador del mapa. Muestra el tamaño estimado antes de empezar y se puede cancelar.
  */
-export function OfflineSection({ coords, place, imgs }: Props) {
+export function OfflineSection({ coords, place, imgs, ids }: Props) {
   const palette = usePalette();
   const [radiusKm, setRadiusKm] = useState<number>(OFFLINE_RADII_KM[1]);
   const [stage, setStage] = useState<Stage>('idle');
@@ -73,6 +76,8 @@ export function OfflineSection({ coords, place, imgs }: Props) {
     setTileProg({ done: 0, total: tiles.length, failed: 0 });
     setPhotoProg({ done: 0, total: photos.length });
     setStage('photos');
+    // Las fichas (texto, ~10 KB por cada 60 especies) van en paralelo a las fotos.
+    void keepSpecies(ids.slice(0, MAX_PHOTOS)).catch(() => {});
     prefetchPhotos(photos, (done, total) => setPhotoProg({ done, total }), () => cancelled.current).then((r) => {
       photoResult.current = r;
       if (cancelled.current) return;

@@ -15,8 +15,9 @@ import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
 import { Meter } from '@/components/Meter';
 import { catalogInfo, journal } from '@/db';
-import { fmtMegabytes } from '@/db/catalogCloud';
-import { catalogUpdatesEnabled, checkCatalogUpdate, useCatalogUpdate } from '@/db/catalogUpdate';
+import { cachedDetailStats } from '@/db/catalogDetail';
+import { fmtMegabytes } from '@/db/catalogRemote';
+import { checkCatalogUpdate, useCatalogUpdate } from '@/db/catalogUpdate';
 import { getSpeciesByIds } from '@/db/catalog';
 import { fmtAgo, fmtDate, fmtInt } from '@/lib/format';
 import { disableRarityAlerts, enableRarityAlerts } from '@/lib/rarityAlerts';
@@ -54,39 +55,45 @@ function CatalogSection() {
   const palette = usePalette();
   const info = catalogInfo();
   const { phase, progress, remote, error } = useCatalogUpdate();
+  const [cache, setCache] = useState<{ shards: number; bytes: number } | null>(null);
+  useEffect(() => {
+    cachedDetailStats()
+      .then(setCache)
+      .catch(() => {});
+  }, []);
   const busy = phase === 'checking' || phase === 'downloading' || phase === 'verifying';
   const action = phase === 'available' && remote ? `Descargar (${fmtMegabytes(remote.files.gz.size)})` : 'Buscar actualización';
+  const stored = cache && cache.shards > 0 ? ` y ${fmtMegabytes(cache.bytes)} de fichas ya abiertas` : '';
   return (
     <Section title="Catálogo de especies" icon="bestiario" accent={palette.leaf} tint={palette.leafTint}>
       <Card tone="outline">
         <Txt variant="bodyStrong">{fmtInt(info.species)} especies de todo el mundo</Txt>
         <Txt variant="small" tone="soft">
-          {`Datos del ${fmtDate(info.built_at)} · ${info.source === 'nube' ? 'actualizado desde la nube' : 'incluido en la app'}`}
+          {`Datos del ${fmtDate(info.built_at)}, en el servidor de Zarpa (Firebase)`}
         </Txt>
-        {catalogUpdatesEnabled ? (
-          <>
-            {phase !== 'idle' ? (
-              <Txt variant="small" tone={phase === 'error' ? 'danger' : phase === 'ready' ? 'brand' : 'soft'} style={styles.gap} accessibilityLiveRegion="polite">
-                {phase === 'error' && error ? error : CATALOG_TEXT[phase]}
-              </Txt>
-            ) : null}
-            {phase === 'downloading' ? <Meter value={progress} color={palette.leaf} height={8} style={styles.gap} /> : null}
-            {phase !== 'ready' ? (
-              <Press
-                disabled={busy}
-                onPress={() => void checkCatalogUpdate({ force: true })}
-                accessibilityRole="button"
-                accessibilityLabel={action}
-                style={[styles.pill, styles.gapLg, { backgroundColor: palette.strongTint }]}>
-                <Txt variant="bodyStrong">{action}</Txt>
-              </Press>
-            ) : null}
-            {phase === 'available' ? (
-              <Txt variant="small" tone="faint" style={styles.gap}>
-                Sin wifi no se descarga sola para no gastar tus datos.
-              </Txt>
-            ) : null}
-          </>
+        <Txt variant="small" tone="faint" style={styles.gap}>
+          {`En este móvil: el índice para buscar y filtrar (${fmtMegabytes(info.size)})${stored}. Cada ficha se baja al abrirla y las de tu cuaderno se guardan para verlas sin red.`}
+        </Txt>
+        {phase !== 'idle' ? (
+          <Txt variant="small" tone={phase === 'error' ? 'danger' : phase === 'ready' ? 'brand' : 'soft'} style={styles.gap} accessibilityLiveRegion="polite">
+            {phase === 'error' && error ? error : CATALOG_TEXT[phase]}
+          </Txt>
+        ) : null}
+        {phase === 'downloading' ? <Meter value={progress} color={palette.leaf} height={8} style={styles.gap} /> : null}
+        {phase !== 'ready' ? (
+          <Press
+            disabled={busy}
+            onPress={() => void checkCatalogUpdate({ force: true })}
+            accessibilityRole="button"
+            accessibilityLabel={action}
+            style={[styles.pill, styles.gapLg, { backgroundColor: palette.strongTint }]}>
+            <Txt variant="bodyStrong">{action}</Txt>
+          </Press>
+        ) : null}
+        {phase === 'available' ? (
+          <Txt variant="small" tone="faint" style={styles.gap}>
+            Sin wifi no se descarga sola para no gastar tus datos.
+          </Txt>
         ) : null}
       </Card>
     </Section>

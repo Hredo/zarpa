@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { catalog, journal } from '@/db';
+import { ensureCountries } from '@/db/catalogDetail';
 import { useJournal } from '@/store/journal';
 
 import { dayKey, monthRange } from './gameUtil';
@@ -74,8 +75,13 @@ export function useMissions(): MissionsView {
         let suggestions: SuggestedSpecies[] = [];
         if (m.scope === 'temporada' && cc) {
           const key = `${cc}:${m.id}`;
-          suggestions = suggestionCache.get(key) ?? (await suggestSpecies(catalog(), m, cc, `${month}:${cc}`));
-          suggestionCache.set(key, suggestions);
+          const cached = suggestionCache.get(key);
+          if (cached) suggestions = cached;
+          // Sin la lista del país (sin red la primera vez) no hay sugerencias, y no se recuerda el vacío.
+          else if (await ensureCountries([cc])) {
+            suggestions = await suggestSpecies(catalog(), m, cc, `${month}:${cc}`);
+            suggestionCache.set(key, suggestions);
+          }
         }
         return { ...m, progress: missionProgress(m, sightings, meta), suggestions };
       };

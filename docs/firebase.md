@@ -22,8 +22,8 @@ bucket, desplegar `storage.rules` y poner la variable a `1`.
 | `app/src/lib/firebase.ts` | Único punto de `initializeApp` |
 | `app/src/lib/auth.ts`, `app/src/store/auth.ts` | Google, Apple, cierre de sesión, borrado de cuenta |
 | `app/src/sync/` | Sincronización del cuaderno (tablas propias `sync_item` y `sync_meta`) |
-| `app/src/db/catalogUpdate.ts` | Actualización del catálogo de especies desde Storage |
-| `tools/zarpa_data/stages/cloud.py` | Publica el catálogo en Storage (`catalog/`) |
+| `app/src/db/catalogUpdate.ts`, `catalogDetail.ts`, `catalogRemote.ts` | Catálogo servido desde Hosting: primera descarga del índice, actualizaciones, fichas y países bajo demanda |
+| `tools/zarpa_data/stages/hosting.py` | Parte el catálogo para Hosting (`tools/out/hosting/`, que es el `public` de `firebase.json`) |
 
 ### Modelo de datos
 
@@ -31,7 +31,6 @@ bucket, desplegar `storage.rules` y poner la variable a `1`.
 - `users/{uid}/private/settings`: ajustes privados.
 - `users/{uid}/sightings/{id}`: copia de cada avistamiento (mismas columnas que la tabla local, sin rutas de ficheros; más `has_photo`, `has_sticker`, `sticker_ext`, `has_voice`, `voice_ext`, `schema`, `synced_at`). Las reglas validan también el diario (clima, momento del día, duración de la nota de voz).
 - Storage (solo con plan Blaze), por avistamiento: `users/{uid}/sightings/{id}.jpg` (foto, JPEG ≤ 10 MB), `{id}.sticker.png|jpg` (pegatina ≤ 10 MB) y `{id}.voice.m4a` (nota de voz, audio ≤ 5 MB; también aac, mp4, caf, 3gp).
-- Storage, `catalog/`: el catálogo de especies versionado y su `manifest.json`. Lectura pública; nadie lo escribe desde la app.
 - Lo social (amigos por código, álbum compartido, perfiles públicos): ver `docs/social.md`.
 
 ## Lo que está hecho en la consola (5 de octubre de 2026)
@@ -52,25 +51,37 @@ Pendiente, cuando haga falta:
 Desde la raíz del repo, con la CLI autorizada (`pnpm dlx firebase-tools login`, una vez por equipo):
 
 ```
-pnpm dlx firebase-tools deploy --only firestore
+pnpm dlx firebase-tools deploy --only firestore    # reglas e índices
+pnpm dlx firebase-tools deploy --only hosting      # catálogo (ver abajo)
 ```
 
 Sube las reglas y los índices (`firestore.indexes.json`: el índice de grupo de colecciones de
 `friendRequests.from`, que usa el borrado de cuenta). Nada de esto cuesta dinero en Spark.
 
-## Publicar el catálogo en Storage
+## El catálogo, en Firebase Hosting
 
-La app trae su catálogo dentro y funciona sin red. Para que reciba datos nuevos (más fotos, nombres…) sin sacar otra versión, se publica en Storage; la app mira una vez al día, con wifi, y usa el nuevo al reabrirse.
+La app no lleva el catálogo dentro (el APK pesaba 305 MB y, instalada, más del doble).
+Vive en Firebase Hosting, que entra en el plan gratuito (10 GB guardados, 360 MB/día de descarga):
+
+| Ruta | Qué es | Cuándo lo baja el móvil |
+|---|---|---|
+| `c/manifest.json` | versión vigente, tamaño y MD5 del índice (sin caché) | al arrancar por primera vez y una vez al día con wifi |
+| `c/<versión>/indice.db.gz` | índice para buscar, filtrar y ordenar (~44 MB; ~19 MB comprimido, servido con `Content-Encoding: gzip`) | la primera vez, con barra de progreso; después solo si hay versión nueva |
+| `c/<versión>/d/<n>.json` | fichas completas en 4096 trozos (resumen, galería con autoría, estado por regiones, países, fuentes) | al abrir una ficha; se guardan en el índice (caché de 600 trozos, sin caducidad las del cuaderno) |
+| `c/<versión>/cc/<CC>.json` | especies de cada país con sus observaciones | al filtrar por país, en «qué ver aquí», misiones y candidatas de la IA |
+
+Publicar un catálogo nuevo (desde `tools/`, y luego desde la raíz):
 
 ```
-gcloud auth application-default login     # una vez por equipo, con tu cuenta de Google del proyecto
-cd tools
-uv run python -m zarpa_data build cloud   # construye y publica; ZARPA_CLOUD_DRY=1 para probar sin subir
+uv run python -m zarpa_data build hosting
+pnpm dlx firebase-tools deploy --only hosting
 ```
 
-Sube `catalog/v/<versión>/catalogo.db.gz` (servido con `Content-Encoding: gzip`), `catalogo.db` sin comprimir de respaldo y, al final, `catalog/manifest.json`. Conserva las 3 últimas versiones. La app solo acepta catálogos de su mismo esquema (`CATALOG_SCHEMA` en `build.py`): si cambian tablas o columnas que la app consulta, sube el número y saca versión nueva de la app.
-
-Coste: cada actualización son ~70 MB por móvil que la baja (salida de Storage). Con muchos usuarios conviene publicar con moderación (p. ej. una vez al mes).
+`hosting` deja en `tools/out/hosting/` la versión nueva y la anterior (una app que aún no
+se ha actualizado sigue encontrando sus fichas). El índice lleva su esquema
+(`INDEX_SCHEMA` en `hosting.py` = `CATALOG_SCHEMA` en `app/src/db/catalogRemote.ts`): si
+cambian tablas o columnas que la app consulta, sube los dos y saca versión nueva de la app.
+Las pruebas de la app (`pnpm test`) leen `tools/out/indice.db`.
 
 ## Cambio de cuenta en el mismo móvil
 

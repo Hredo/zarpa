@@ -89,7 +89,7 @@ def run(name: str, quant: str) -> None:
 // especies) sobre {report['test_images']} fotos verificadas de {report['species']} especies que el modelo no vio al entrenar.
 import type {{ BreedModel, SpeciesModel }} from './config';
 
-// Como en catalogAsset.ts: los `require` de recursos, en constantes de primer nivel.
+// Los `require` de recursos, en constantes de primer nivel (Metro los resuelve al empaquetar).
 const ENCODER: number = require('../../assets/models/{name}_{quant}.pte');
 const INDEX: number = require('../../assets/models/species_index.bin');
 

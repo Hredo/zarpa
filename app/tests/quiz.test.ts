@@ -1,5 +1,3 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
 
 import { addDays } from '@/lib/gameUtil';
 import {
@@ -16,8 +14,9 @@ import {
   type QuizState,
 } from '@/lib/quiz';
 import type { Reader } from '@/lib/speciesMatch';
+import { openIndex } from './catalogIndex';
 
-const db = new Database(path.join(__dirname, '..', 'assets', 'db', 'catalogo.db'), { readonly: true });
+const db = openIndex();
 const reader: Reader = {
   getAllAsync: async <T,>(sql: string, params: (string | number)[]) => db.prepare(sql).all(...params) as T[],
 };

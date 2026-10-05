@@ -1,5 +1,3 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
 
 import { dayKey, isoWeek, monthRange } from '@/lib/gameUtil';
 import {
@@ -12,8 +10,9 @@ import {
   type SightingLite,
 } from '@/lib/missions';
 import { matcherSql, matches, type Matcher, type Reader, type SpeciesMeta } from '@/lib/speciesMatch';
+import { openIndex } from './catalogIndex';
 
-const db = new Database(path.join(__dirname, '..', 'assets', 'db', 'catalogo.db'), { readonly: true });
+const db = openIndex();
 const reader: Reader = {
   getAllAsync: async <T,>(sql: string, params: (string | number)[]) => db.prepare(sql).all(...params) as T[],
 };

@@ -1,15 +1,14 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
 
-import { CATALOG_SPECIES } from '@/db/catalogAsset';
 import { buildCountQuery, buildListQuery, COUNTRY_MIN_OBS, EMPTY_FILTERS, ftsQuery, type Filters } from '@/db/query';
+import { openIndex, speciesCount } from './catalogIndex';
 
 /*
  * Las consultas del Bestiario contra el catálogo de verdad. Si `tools/` cambia
  * el esquema o el filtro por país deja de respetar el mínimo de observaciones,
  * esto falla antes de llegar al móvil.
  */
-const db = new Database(path.join(__dirname, '..', 'assets', 'db', 'catalogo.db'), { readonly: true });
+const db = openIndex();
+const CATALOG_SPECIES = speciesCount(db);
 const ctx = { caughtIds: [] as number[], savedIds: [] as number[] };
 
 function count(f: Partial<Filters>, c = ctx): number {

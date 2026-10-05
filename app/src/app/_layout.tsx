@@ -2,15 +2,16 @@ import { useFonts } from 'expo-font';
 import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AccountSwitchSheet } from '@/components/AccountSwitchSheet';
-import { BootError } from '@/components/BootError';
+import { CatalogDownload, type BootState } from '@/components/CatalogDownload';
 import { WelcomeGate } from '@/components/WelcomeGate';
-import { openDatabases } from '@/db';
+import { CatalogOffline, openDatabases } from '@/db';
+import { keepJournalSpecies } from '@/db/catalogDetail';
 // Define la tarea de rarezas al cargar: el sistema puede arrancar la app solo para ella.
 import { routeRarityNotifications } from '@/lib/rarityAlerts';
 import { checkCatalogUpdate } from '@/db/catalogUpdate';
@@ -29,22 +30,36 @@ export default function RootLayout() {
   const palette = usePalette();
   const [fontsLoaded, fontError] = useFonts(fontAssets);
   const [dbReady, setDbReady] = useState(false);
-  const [dbError, setDbError] = useState<Error | null>(null);
+  const [boot, setBoot] = useState<BootState>({ phase: 'opening' });
 
-  useEffect(() => {
-    openDatabases()
+  // La primera vez se baja el índice del catálogo (con progreso); sin red se
+  // explica y se puede reintentar sin cerrar la app.
+  const start = useCallback(() => {
+    openDatabases((p) => setBoot({ phase: p.phase, progress: p.progress, total: p.total }))
       .then(() => useJournal.getState().load())
       .then(() => {
         // La cuenta y la copia en la nube son opcionales: arrancan sin bloquear la app.
         startAuth();
         startSync();
         startSocial();
-        // El catálogo nuevo (si lo hay) se busca con la app ya en marcha, sin competir con el arranque.
+        // El catálogo nuevo (si lo hay) se busca con la app ya en marcha, sin competir con el arranque;
+        // y las fichas del cuaderno se guardan para verlas sin red.
         setTimeout(() => void checkCatalogUpdate(), 8000);
+        setTimeout(() => void keepJournalSpecies().catch(() => {}), 12000);
       })
       .then(() => setDbReady(true))
-      .catch((e: unknown) => setDbError(e instanceof Error ? e : new Error(String(e))));
+      .catch((e: unknown) =>
+        setBoot(e instanceof CatalogOffline ? { phase: 'offline' } : { phase: 'error', message: e instanceof Error ? e.message : String(e) }),
+      );
   }, []);
+
+  useEffect(() => {
+    start();
+  }, [start]);
+  const retry = () => {
+    setBoot({ phase: 'opening' });
+    start();
+  };
 
   const ready = (fontsLoaded || fontError) && dbReady;
 
@@ -54,11 +69,12 @@ export default function RootLayout() {
     return routeRarityNotifications((id) => router.push({ pathname: '/especie/[id]', params: { id: String(id) } }));
   }, [ready]);
 
+  const showBoot = !dbReady && boot.phase !== 'opening';
   useEffect(() => {
-    if (ready || dbError) SplashScreen.hideAsync().catch(() => {});
-  }, [ready, dbError]);
+    if (ready || showBoot) SplashScreen.hideAsync().catch(() => {});
+  }, [ready, showBoot]);
 
-  if (dbError) return <BootError error={dbError} />;
+  if (showBoot) return <CatalogDownload state={boot} onRetry={retry} />;
   if (!ready) return <View style={[styles.fill, { backgroundColor: palette.bg }]} />;
 
   return (

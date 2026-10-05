@@ -12,6 +12,7 @@ import {
 import { create } from 'zustand';
 
 import { catalog } from '@/db';
+import { ensureCountries } from '@/db/catalogDetail';
 import { COUNTRY_MIN_OBS } from '@/db/query';
 
 import { BREED_MODEL, SPECIES_MODEL, type ModelSource } from './config';
@@ -144,6 +145,8 @@ export async function candidatesFor(cc: string | null): Promise<number[] | undef
   if (!cc) return undefined;
   const hit = candidateCache.get(cc);
   if (hit) return hit;
+  // La lista del país se baja una vez; sin red (y sin bajar) se compara con todas.
+  if (!(await ensureCountries([cc]))) return undefined;
   const rows = await catalog().getAllAsync<{ id: number }>('SELECT id FROM country WHERE cc = ? AND obs >= ?', [
     cc,
     COUNTRY_MIN_OBS,

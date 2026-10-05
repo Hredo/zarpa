@@ -1,3 +1,5 @@
+import { ensureCountries, speciesExtra } from './catalogDetail';
+import type { ShardEntry } from './catalogRemote';
 import { catalog, journal } from './index';
 import {
   BREED_COLUMNS,
@@ -44,6 +46,11 @@ export type SpeciesDetail = SpeciesRow & {
   /** JSON [[id de ciudad, observaciones], …] */
   cities: string | null;
   cities_n: number | null;
+  /**
+   * false si la parte de la ficha que vive en el servidor (resumen, galería,
+   * países, fuentes…) no se pudo bajar: sin red y sin copia guardada.
+   */
+  complete: boolean;
 };
 
 export type SpeciesImage = {
@@ -76,22 +83,50 @@ export async function listSpecies(
   limit: number,
   offset: number,
 ): Promise<SpeciesRow[]> {
+  // El filtro por país usa la lista de cada país, que se baja la primera vez.
+  if (f.countries.length) await ensureCountries(f.countries);
   const { sql, params } = buildListQuery(f, ctx, sort, limit, offset);
   return catalog().getAllAsync<SpeciesRow>(sql, params);
 }
 
 export async function countSpecies(f: Filters, ctx: Context): Promise<number> {
+  if (f.countries.length) await ensureCountries(f.countries);
   const { sql, params } = buildCountQuery(f, ctx);
   const row = await catalog().getFirstAsync<{ n: number }>(sql, params);
   return row?.n ?? 0;
 }
 
+/** Campos de la ficha que vienen del servidor, vacíos mientras no lleguen. */
+const REMOTE_EMPTY = {
+  summary_src: null,
+  aliases_es: null,
+  diet_detail: null,
+  cities: null,
+  cities_n: null,
+  wd: null,
+  worms: null,
+  eswiki: null,
+  enwiki: null,
+  taxo: 'accepted',
+  gbif_name: null,
+};
+
+/**
+ * Ficha de una especie: lo del índice (nombre, grupo, rareza, foto…) y lo que
+ * trae su trozo de Hosting (resumen, enlaces, ciudades…). Sin red y sin copia
+ * guardada, sale lo del índice con `complete: false`.
+ */
 export async function getSpecies(id: number): Promise<SpeciesDetail | null> {
-  return catalog().getFirstAsync<SpeciesDetail>(
-    `SELECT s.*, d.summary, d.summary_lang, d.summary_src, d.aliases_es, d.diet_detail, d.activity, d.migration, d.cities, d.cities_n
-     FROM species_v s LEFT JOIN detail d ON d.id = s.id WHERE s.id = ?`,
-    [id],
-  );
+  const [base, extra] = await Promise.all([
+    catalog().getFirstAsync<Omit<SpeciesDetail, keyof typeof REMOTE_EMPTY | 'complete'>>(
+      `SELECT s.*, d.summary, d.summary_lang, d.activity, d.migration
+       FROM species_v s LEFT JOIN detail d ON d.id = s.id WHERE s.id = ?`,
+      [id],
+    ),
+    speciesExtra(id),
+  ]);
+  if (!base) return null;
+  return { ...REMOTE_EMPTY, ...base, ...(extra?.d ?? {}), complete: extra !== null } as SpeciesDetail;
 }
 
 export async function getSpeciesByIds(ids: number[]): Promise<SpeciesRow[]> {
@@ -102,12 +137,17 @@ export async function getSpeciesByIds(ids: number[]): Promise<SpeciesRow[]> {
   );
 }
 
+/** Galería con autoría y licencia (del trozo de Hosting; vacía sin red). */
 export async function getImages(id: number): Promise<SpeciesImage[]> {
-  return catalog().getAllAsync<SpeciesImage>('SELECT * FROM image WHERE id = ? ORDER BY rank', [id]);
+  return imagesOf(await speciesExtra(id));
+}
+
+export function imagesOf(extra: ShardEntry | null): SpeciesImage[] {
+  return (extra?.i ?? []).map(([rank, url, ratio, author, license, source, page]) => ({ rank, url, ratio, author, license, source, page }));
 }
 
 export async function getProvenance(id: number): Promise<Provenance[]> {
-  return catalog().getAllAsync<Provenance>('SELECT field, sources, note FROM provenance WHERE id = ?', [id]);
+  return (await speciesExtra(id))?.p?.map(([field, sources, note]) => ({ field, sources, note })) ?? [];
 }
 
 export async function getSources(): Promise<Source[]> {
@@ -115,10 +155,7 @@ export async function getSources(): Promise<Source[]> {
 }
 
 export async function getCountries(id: number): Promise<CountryPresence[]> {
-  return catalog().getAllAsync<CountryPresence>(
-    'SELECT cc, obs, means FROM country WHERE id = ? ORDER BY obs DESC',
-    [id],
-  );
+  return (await speciesExtra(id))?.c?.map(([cc, obs, means]) => ({ cc, obs, means })) ?? [];
 }
 
 export async function groupTotals(): Promise<{ code: string; label: string; total: number }[]> {
@@ -132,6 +169,7 @@ export async function catalogMeta(): Promise<Record<string, string>> {
 
 /** Especies más observadas en un país: el «qué puedes encontrar aquí». */
 export async function topInCountry(cc: string, limit: number): Promise<(SpeciesRow & { local_obs: number })[]> {
+  await ensureCountries([cc]);
   return catalog().getAllAsync(
     `SELECT ${LIST_COLUMNS}, c.obs AS local_obs FROM country c JOIN species_v s ON s.id = c.id
      WHERE c.cc = ? ORDER BY c.obs DESC LIMIT ?`,
@@ -264,28 +302,21 @@ const LENGTH_KIND: Record<string, string> = {
 };
 
 /**
- * Tamaño verificado (etapa `size` de tools/). Si el catálogo es anterior a
- * `mass_g` / `length_mm`, la consulta falla y se devuelve null: la ficha no
- * muestra el bloque (nunca se inventa un tamaño).
+ * Tamaño verificado (etapa `size` de tools/): masa y longitud vienen en el
+ * índice; qué longitud es (total, hocico-cloaca…), en la procedencia del trozo.
+ * Sin dato fiable, null: la ficha no muestra el bloque (nunca se inventa un tamaño).
  */
 export async function getSize(id: number): Promise<SizeInfo | null> {
-  try {
-    const row = await catalog().getFirstAsync<{ mass_g: number | null; length_mm: number | null }>(
-      'SELECT mass_g, length_mm FROM species WHERE id = ?',
-      [id],
-    );
-    if (!row || (row.mass_g == null && row.length_mm == null)) return null;
-    let kind: string | null = null;
-    if (row.length_mm != null) {
-      const p = await catalog().getFirstAsync<{ note: string | null }>(
-        "SELECT note FROM provenance WHERE id = ? AND field = 'length_mm'",
-        [id],
-      );
-      const code = p?.note?.split(':')[0]?.trim();
-      kind = (code && LENGTH_KIND[code]) || null;
-    }
-    return { mass_g: row.mass_g, length_mm: row.length_mm, length_kind: kind };
-  } catch {
-    return null;
+  const row = await catalog().getFirstAsync<{ mass_g: number | null; length_mm: number | null }>(
+    'SELECT mass_g, length_mm FROM species WHERE id = ?',
+    [id],
+  );
+  if (!row || (row.mass_g == null && row.length_mm == null)) return null;
+  let kind: string | null = null;
+  if (row.length_mm != null) {
+    const note = (await getProvenance(id)).find((p) => p.field === 'length_mm')?.note;
+    const code = note?.split(':')[0]?.trim();
+    kind = (code && LENGTH_KIND[code]) || null;
   }
+  return { mass_g: row.mass_g, length_mm: row.length_mm, length_kind: kind };
 }

@@ -1,13 +1,12 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
 
 import { BREED_COLUMNS, breedWhere } from '@/db/query';
+import { openIndex } from './catalogIndex';
 
 /*
  * Razas del catálogo empaquetado: que cada una venga de su autoridad, que la
  * búsqueda encuentre los nombres oficiales y que el filtro por país funcione.
  */
-const db = new Database(path.join(__dirname, '..', 'assets', 'db', 'catalogo.db'), { readonly: true });
+const db = openIndex();
 const DOG = 47144;
 const CATTLE = 74113;
 

@@ -4,32 +4,29 @@ import * as Network from 'expo-network';
 import * as SQLite from 'expo-sqlite';
 import { create } from 'zustand';
 
-import { CATALOG_SCHEMA } from './catalogAsset';
-import { isNewerCatalog, parseManifest, storageUrl, type CatalogInfo, type CatalogManifest } from './catalogCloud';
+import { CATALOG_SCHEMA, catalogUrl, isNewerCatalog, parseManifest, type CatalogInfo, type CatalogManifest } from './catalogRemote';
 
 /*
- * Actualización del catálogo desde Cloud Storage («Storage + caché local»).
+ * El índice del catálogo en el móvil: primera descarga y actualizaciones.
  *
- * La app trae un catálogo dentro y funciona sin red desde el primer día. Una
- * vez al día (o al pulsar «Buscar actualización» en el perfil) se mira el
- * manifiesto público `catalog/manifest.json`. Si hay un catálogo más nuevo de
- * este mismo esquema:
- *   1. se baja a `catalogo-<versión>.db.part` (con wifi; con datos móviles solo
- *      si la persona lo pide), primero comprimido y, si el MD5 no cuadra, sin
- *      comprimir;
- *   2. se comprueba el MD5 y se renombra a `catalogo-<versión>.db`;
- *   3. se anota en `catalogo-activo.json` y se usa al volver a abrir la app
+ * La app no lleva el catálogo dentro: al abrirse por primera vez baja de
+ * Firebase Hosting el índice ligero (`installLatestCatalog`, con progreso en
+ * la pantalla de arranque). Después, una vez al día y con wifi (o al pulsar
+ * «Buscar actualización» en el perfil), mira `c/manifest.json`; si hay un
+ * índice más nuevo de su esquema:
+ *   1. lo baja a `indice-<versión>.db.part`, primero comprimido y, si el MD5 no
+ *      cuadra, sin comprimir;
+ *   2. comprueba el MD5 y lo renombra a `indice-<versión>.db`;
+ *   3. lo anota en `catalogo-activo.json` y se usa al volver a abrir la app
  *      (cambiarlo en caliente dejaría consultas a medias con la base vieja).
  */
 
 const ACTIVE_FILE = 'catalogo-activo.json';
 const LAST_CHECK_KEY = 'zarpa-catalog-last-check';
 const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
-const BUCKET = process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET ?? '';
+export const INDEX_PREFIX = 'indice-';
 
-export const catalogUpdatesEnabled = BUCKET.length > 0;
-
-export type DownloadedCatalog = CatalogInfo & { file: string; md5: string };
+export type ActiveCatalog = CatalogInfo & { file: string; md5: string };
 
 type Phase =
   | 'idle'
@@ -56,47 +53,52 @@ type State = {
 
 export const useCatalogUpdate = create<State>(() => ({ phase: 'idle', progress: 0, remote: null, checkedAt: null, error: null }));
 
-function dbDir(): Directory {
+/** No hay red (o no responde Hosting): la primera descarga no puede hacerse. */
+export class CatalogOffline extends Error {
+  constructor() {
+    super('Sin conexión');
+    this.name = 'CatalogOffline';
+  }
+}
+
+export function dbDir(): Directory {
   return new Directory(SQLite.defaultDatabaseDirectory);
 }
 
-/** El catálogo bajado de la nube que está anotado como activo, si sigue en disco. */
-export function readDownloadedCatalog(): DownloadedCatalog | null {
+/** El índice anotado como activo, si sigue en disco y es del esquema de la app. */
+export function readActiveCatalog(): ActiveCatalog | null {
   try {
     const f = new File(dbDir(), ACTIVE_FILE);
     if (!f.exists) return null;
-    const info = JSON.parse(f.textSync()) as DownloadedCatalog;
-    if (!info?.file || !new File(dbDir(), info.file).exists) return null;
-    return { ...info, source: 'nube' };
+    const info = JSON.parse(f.textSync()) as ActiveCatalog;
+    if (!info?.file || info.schema !== CATALOG_SCHEMA || !new File(dbDir(), info.file).exists) return null;
+    return info;
   } catch {
     return null;
   }
 }
 
-/** Olvida el catálogo bajado (p. ej. si no abre): la app vuelve al suyo. */
-export function forgetDownloadedCatalog(): void {
+/** Olvida el índice activo (p. ej. si no abre): se volverá a bajar. */
+export function forgetActiveCatalog(): void {
   try {
     const f = new File(dbDir(), ACTIVE_FILE);
     if (f.exists) f.delete();
   } catch {
-    // Sin el fichero, la próxima vez se abre el de la app igualmente.
+    // Sin el fichero, el próximo arranque baja el índice otra vez.
   }
 }
 
 let installed: CatalogInfo | null = null;
-/** Lo anota `openDatabases` con el catálogo que ha abierto. */
+/** Lo anota `openDatabases` con el índice que ha abierto. */
 export function setInstalledCatalog(info: CatalogInfo): void {
   installed = info;
-}
-export function installedCatalog(): CatalogInfo | null {
-  return installed;
 }
 
 async function fetchManifest(): Promise<CatalogManifest | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
-    const res = await fetch(storageUrl(BUCKET, 'catalog/manifest.json'), { signal: ctrl.signal, headers: { 'Cache-Control': 'no-cache' } });
+    const res = await fetch(catalogUrl('c/manifest.json'), { signal: ctrl.signal, headers: { 'Cache-Control': 'no-cache' } });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return parseManifest(await res.json());
@@ -105,17 +107,17 @@ async function fetchManifest(): Promise<CatalogManifest | null> {
   }
 }
 
-async function downloadVerified(m: CatalogManifest, kind: 'gz' | 'raw'): Promise<File | null> {
-  const part = new File(dbDir(), `catalogo-${m.version}.db.part`);
+async function downloadVerified(m: CatalogManifest, kind: 'gz' | 'raw', onProgress: (p: number) => void, onVerify: () => void): Promise<File | null> {
+  const part = new File(dbDir(), `${INDEX_PREFIX}${m.version}.db.part`);
   if (part.exists) part.delete();
-  const task = new DownloadTask(storageUrl(BUCKET, m.files[kind].path), part, {
+  const task = new DownloadTask(catalogUrl(m.files[kind].path), part, {
     // Los bytes escritos son ya los descomprimidos: se comparan con el tamaño final.
-    onProgress: ({ bytesWritten }) => useCatalogUpdate.setState({ progress: Math.min(0.99, bytesWritten / m.size) }),
+    onProgress: ({ bytesWritten }) => onProgress(Math.min(0.99, bytesWritten / m.size)),
   });
   const file = await task.downloadAsync();
   if (!file) return null;
-  useCatalogUpdate.setState({ phase: 'verifying' });
-  // Un respiro para que la pantalla pinte «Comprobando» antes del cálculo (síncrono, ~1 s).
+  onVerify();
+  // Un respiro para que la pantalla pinte «Comprobando» antes del cálculo (síncrono).
   await new Promise((r) => setTimeout(r, 50));
   const md5 = file.info({ md5: true }).md5;
   if (md5 === m.md5) return file;
@@ -123,15 +125,67 @@ async function downloadVerified(m: CatalogManifest, kind: 'gz' | 'raw'): Promise
   return null;
 }
 
+/** Baja, comprueba e instala el índice del manifiesto; queda anotado como activo. */
+async function install(m: CatalogManifest, onProgress: (p: number) => void, onVerify: () => void): Promise<ActiveCatalog> {
+  const file = (await downloadVerified(m, 'gz', onProgress, onVerify)) ?? (await downloadVerified(m, 'raw', onProgress, onVerify));
+  if (!file) throw new Error('El catálogo descargado no supera la comprobación');
+  const name = `${INDEX_PREFIX}${m.version}.db`;
+  const dest = new File(dbDir(), name);
+  if (dest.exists) dest.delete();
+  file.rename(name);
+  const info: ActiveCatalog = {
+    version: m.version,
+    schema: m.schema,
+    built_at: m.built_at,
+    species: m.species,
+    shards: m.shards,
+    size: m.size,
+    file: name,
+    md5: m.md5,
+  };
+  new File(dbDir(), ACTIVE_FILE).write(JSON.stringify(info));
+  return info;
+}
+
+function isNetworkError(e: unknown): boolean {
+  return e instanceof TypeError || (e instanceof Error && /network|fetch|abort|timeout|connect|host/i.test(e.message));
+}
+
+/**
+ * Primera descarga (o tras un índice dañado): baja el índice vigente. Lanza
+ * `CatalogOffline` si no hay red; la pantalla de arranque ofrece reintentar.
+ */
+export async function installLatestCatalog(onProgress: (p: number, phase: 'downloading' | 'verifying', total: number) => void): Promise<ActiveCatalog> {
+  let m: CatalogManifest | null;
+  try {
+    m = await fetchManifest();
+  } catch (e) {
+    if (isNetworkError(e)) throw new CatalogOffline();
+    throw e;
+  }
+  if (!m) throw new Error('No hay catálogo publicado');
+  if (m.schema !== CATALOG_SCHEMA) throw new Error('El catálogo publicado es de otra versión de la app: actualiza Zarpa');
+  const total = m.files.gz.size;
+  try {
+    return await install(
+      m,
+      (p) => onProgress(p, 'downloading', total),
+      () => onProgress(1, 'verifying', total),
+    );
+  } catch (e) {
+    if (isNetworkError(e)) throw new CatalogOffline();
+    throw e;
+  }
+}
+
 let running: Promise<void> | null = null;
 
 /**
- * Mira si hay un catálogo nuevo y, si toca, lo baja. Sin `force` respeta el
- * ritmo de una vez al día y solo baja con wifi; con `force` (botón del perfil)
- * mira ya y baja con cualquier conexión.
+ * Mira si hay un índice nuevo y, si toca, lo baja. Sin `force` respeta el
+ * ritmo de una vez al día y solo baja con wifi; con `force` (botón del perfil,
+ * o una ficha que ya no está en el servidor) mira ya y baja con cualquier red.
  */
 export function checkCatalogUpdate(opts: { force?: boolean } = {}): Promise<void> {
-  if (!catalogUpdatesEnabled) return Promise.resolve();
   running ??= check(opts).finally(() => {
     running = null;
   });
@@ -159,7 +213,7 @@ async function check({ force = false }: { force?: boolean }): Promise<void> {
     useCatalogUpdate.setState({ remote: m, checkedAt: now });
 
     // ¿Ya está bajado y esperando a que se reabra la app?
-    const pending = readDownloadedCatalog();
+    const pending = readActiveCatalog();
     if (m && pending && pending.version === m.version && pending.version !== current.version) {
       useCatalogUpdate.setState({ phase: 'ready' });
       return;
@@ -175,27 +229,16 @@ async function check({ force = false }: { force?: boolean }): Promise<void> {
     }
 
     useCatalogUpdate.setState({ phase: 'downloading', progress: 0 });
-    const file = (await downloadVerified(m, 'gz')) ?? (await downloadVerified(m, 'raw'));
-    if (!file) throw new Error('El catálogo descargado no supera la comprobación');
-    const name = `catalogo-${m.version}.db`;
-    const dest = new File(dbDir(), name);
-    if (dest.exists) dest.delete();
-    file.rename(name);
-    const info: DownloadedCatalog = {
-      version: m.version,
-      schema: m.schema,
-      built_at: m.built_at,
-      species: m.species,
-      source: 'nube',
-      file: name,
-      md5: m.md5,
-    };
-    new File(dbDir(), ACTIVE_FILE).write(JSON.stringify(info));
+    await install(
+      m,
+      (progress) => useCatalogUpdate.setState({ progress }),
+      () => useCatalogUpdate.setState({ phase: 'verifying' }),
+    );
     useCatalogUpdate.setState({ phase: 'ready', progress: 1 });
   } catch (e) {
     useCatalogUpdate.setState({
       phase: 'error',
-      error: e instanceof Error && /network|fetch|abort/i.test(e.message) ? 'Sin conexión estable. Se reintentará.' : 'No se pudo actualizar el catálogo.',
+      error: isNetworkError(e) ? 'Sin conexión estable. Se reintentará.' : 'No se pudo actualizar el catálogo.',
     });
   }
 }

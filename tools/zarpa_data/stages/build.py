@@ -1,5 +1,5 @@
 """
-Etapa final · Construye el catálogo SQLite que viaja dentro de la app.
+Etapa · Construye el catálogo SQLite completo (`out/catalogo.db`).
 
 Aquí se aplican las reglas de verificación. Cada dato que llega a la ficha
 cumple una de estas dos condiciones, y se guarda de dónde salió:
@@ -13,34 +13,28 @@ Si un dato no cumple ninguna, **no se escribe**: la ficha muestra el hueco, no
 una suposición. Las reglas concretas están en cada función `_verify_*`.
 
 Lee lo que haya en `out/` (cada etapa añade una capa; las que faltan dejan sus
-columnas vacías) y escribe:
-  - `out/catalogo.db`
-  - `app/assets/db/catalogo.db` y `app/src/db/catalogAsset.ts` (versión).
+columnas vacías) y escribe `out/catalogo.db` y su ficha `out/catalogo.json`.
+La app no lo lleva dentro: la etapa `hosting` lo parte en un índice ligero y
+fichas por trozos que se sirven desde Firebase Hosting.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import shutil
 import sqlite3
 import unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 
 from .. import config
 from .. import names as nm
 from ..presence import species_by_gbif_key, species_countries
 from ..taxonomy import GROUP_LABEL, group_of, rarity_of
 
-APP = config.ROOT.parent / "app"
-
-# Versión del esquema del catálogo: súbela cuando la app necesite tablas o
-# columnas nuevas. La app solo acepta catálogos descargados de su mismo esquema
-# (un catálogo nuevo con columnas que una app vieja no espera no se le ofrece).
+# Versión del esquema de esta base completa (la de lo que baja la app es
+# INDEX_SCHEMA, en la etapa `hosting`).
 CATALOG_SCHEMA = 3
 
 SCHEMA = """
@@ -208,6 +202,12 @@ CREATE VIRTUAL TABLE species_fts USING fts5(
   content = '',
   tokenize = 'unicode61 remove_diacritics 2'
 );
+
+-- Texto extra de búsqueda (otros nombres y términos de los rasgos) de cada
+-- especie y raza: los índices de arriba no guardan el texto, y la etapa
+-- `hosting` los rehace a su medida para el índice que baja el móvil.
+CREATE TABLE search (id INTEGER PRIMARY KEY, aliases TEXT);
+CREATE TABLE breed_search (rid INTEGER PRIMARY KEY, other TEXT);
 """
 
 SOURCES = [
@@ -722,10 +722,13 @@ def run() -> None:
                 "INSERT INTO image VALUES (?,?,?,?,?,?,?,?)",
                 (u["inat_id"], rank, _short(im["url"]), im.get("ratio"), im.get("author"), im.get("license"), im["source"], _short(im.get("page"))),
             )
+        aliases = " ".join(r["aliases"] + r["facts"]["search"])
         db.execute(
             "INSERT INTO species_fts (rowid, name_es, name_en, sci, aliases) VALUES (?,?,?,?,?)",
-            (u["inat_id"], r["name_es"] or "", name_en or "", u["name"], " ".join(r["aliases"] + r["facts"]["search"])),
+            (u["inat_id"], r["name_es"] or "", name_en or "", u["name"], aliases),
         )
+        if aliases:
+            db.execute("INSERT INTO search VALUES (?,?)", (u["inat_id"], aliases))
 
     # Presencia por país (GBIF) + establecimiento (iNaturalist, solo países).
     place_cc = _place_codes()
@@ -785,7 +788,7 @@ def run() -> None:
 
     raw = db_path.read_bytes()
     version = hashlib.sha256(raw).hexdigest()[:12]
-    # Ficha del catálogo para la etapa `cloud` (manifiesto de Cloud Storage).
+    # Ficha del catálogo para la etapa `hosting`.
     (config.OUT / "catalogo.json").write_text(
         json.dumps(
             {
@@ -804,10 +807,6 @@ def run() -> None:
         encoding="utf-8",
     )
     del raw
-    if os.environ.get("ZARPA_NO_PUBLISH"):
-        print("[build] ZARPA_NO_PUBLISH: no se copia a app/")
-    else:
-        _publish(db_path, version, total, built_at)
     print(f"[build] {total} especies · {n_breeds} razas · excluidas {dict(excluded)} · versión {version}")
 
 
@@ -1055,6 +1054,7 @@ def _insert_breeds(db: sqlite3.Connection, breeds: list[dict], included: set[int
             ),
         )
         db.execute("INSERT INTO breed_fts (rowid, name, other) VALUES (?,?,?)", (rid, name, " ".join(other)))
+        db.execute("INSERT INTO breed_search VALUES (?,?)", (rid, " ".join(other)))
         n += 1
     db.execute("INSERT INTO breed_fts(breed_fts) VALUES ('optimize')")
     return n
@@ -1075,19 +1075,3 @@ def _wiki_title(url: str | None) -> str | None:
     from urllib.parse import unquote
 
     return unquote(url.rsplit("/wiki/", 1)[-1])
-
-
-def _publish(db_path: Path, version: str, total: int, built_at: str) -> None:
-    assets = APP / "assets" / "db"
-    assets.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(db_path, assets / "catalogo.db")
-    (APP / "src" / "db" / "catalogAsset.ts").write_text(
-        "// Generado por tools/zarpa_data/stages/build.py. No editar a mano.\n"
-        f"export const CATALOG_VERSION = '{version}';\n"
-        f"export const CATALOG_SPECIES = {total};\n"
-        f"export const CATALOG_SCHEMA = {CATALOG_SCHEMA};\n"
-        f"export const CATALOG_BUILT_AT = '{built_at}';\n"
-        "export const CATALOG_ASSET: number = require('../../assets/db/catalogo.db');\n",
-        encoding="utf-8",
-        newline="\n",  # en Windows, sin esto sale con CRLF y git lo ve todo cambiado
-    )
