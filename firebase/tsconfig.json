@@ -2,15 +2,12 @@
   "compilerOptions": {
     "module": "node16",
     "target": "es2022",
-    "lib": ["es2023"],
+    "lib": ["es2023", "dom"],
     "types": ["node"],
-    "outDir": "lib",
-    "rootDir": "src",
     "strict": true,
-    "noImplicitReturns": true,
+    "noEmit": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "sourceMap": true
+    "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["test", "vitest.config.mts"]
 }

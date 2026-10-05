@@ -1,5 +1,5 @@
 import { buildAlbum, compareAlbums, diffAlbum, entryHash, fmtMonth, type AlbumSighting } from '@/social/albumLogic';
-import { fmtCode } from '@/social/api';
+import { fmtCode } from '@/social/flows';
 
 const s = (id: string, species_id: number | null, created_at: string, sticker: string | null = null): AlbumSighting => ({
   id,

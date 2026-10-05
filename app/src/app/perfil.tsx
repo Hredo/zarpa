@@ -21,6 +21,7 @@ import { getSpeciesByIds } from '@/db/catalog';
 import { fmtAgo, fmtDate, fmtInt } from '@/lib/format';
 import { disableRarityAlerts, enableRarityAlerts } from '@/lib/rarityAlerts';
 import { connectInat, disconnectInat, inatEnabled, InatCancelled, InatError, loadInat, useInat } from '@/lib/inat';
+import { storageEnabled } from '@/lib/firebase';
 import { useAuth } from '@/store/auth';
 import { useJournal } from '@/store/journal';
 import { useSocial } from '@/social';
@@ -127,7 +128,9 @@ function SocialSection() {
               Compartir mi álbum
             </Txt>
             <Txt variant="small" tone="soft">
-              Tus amigos verán tus especies y pegatinas. Nunca dónde las viste.
+              {storageEnabled
+                ? 'Tus amigos verán tus especies y pegatinas. Nunca dónde las viste.'
+                : 'Tus amigos verán tus especies y cuándo las viste. Nunca dónde.'}
             </Txt>
           </View>
           <Switch
@@ -316,7 +319,7 @@ export default function Perfil() {
   const confirmDelete = () =>
     Alert.alert(
       'Borrar la cuenta',
-      'Se borrarán para siempre tu perfil, tus avistamientos y tus fotos de la nube, y se cerrará tu cuenta. Esta acción no se puede deshacer.\n\nTu cuaderno seguirá en este móvil.',
+      `Se borrarán para siempre tu perfil, tus amigos y tus avistamientos${storageEnabled ? ' y fotos' : ''} de la nube, y se cerrará tu cuenta. Esta acción no se puede deshacer.\n\nTu cuaderno seguirá en este móvil.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -405,7 +408,7 @@ export default function Perfil() {
             <Card>
               <Txt variant="subheading">Guarda tu álbum en la nube</Txt>
               <Txt variant="body" tone="soft" style={styles.gap}>
-                Con una cuenta tendrás perfil y copia de seguridad de tus avistamientos y fotos. Es opcional: sin ella Zarpa funciona igual.
+                {`Con una cuenta tendrás perfil, amigos y copia de seguridad de tus avistamientos${storageEnabled ? ' y fotos' : ''}. Es opcional: sin ella Zarpa funciona igual.`}
               </Txt>
               <View style={styles.gapLg}>{status === 'loading' ? <Txt variant="small" tone="faint">Comprobando tu sesión…</Txt> : <AccountButtons />}</View>
             </Card>
@@ -444,6 +447,11 @@ export default function Perfil() {
                   {sync.error ? (
                     <Txt variant="small" tone="danger">
                       {sync.error}
+                    </Txt>
+                  ) : null}
+                  {!storageEnabled ? (
+                    <Txt variant="small" tone="faint" style={styles.gap}>
+                      Se copian los datos de cada avistamiento. Las fotos, pegatinas y notas de voz se quedan en este móvil.
                     </Txt>
                   ) : null}
                 </View>
@@ -527,7 +535,7 @@ export default function Perfil() {
               </Txt>
             </Press>
             <Txt variant="small" tone="faint" style={styles.gap}>
-              Borrar la cuenta elimina de la nube tu perfil, tus avistamientos y tus fotos. Lo guardado en este móvil no se toca.
+              {`Borrar la cuenta elimina de la nube tu perfil, tus amigos y tus avistamientos${storageEnabled ? ' y fotos' : ''}. Lo guardado en este móvil no se toca.`}
             </Txt>
           </Section>
         ) : null}

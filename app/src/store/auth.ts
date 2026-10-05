@@ -4,6 +4,7 @@ import { create } from 'zustand';
 
 import { AuthCancelled, AuthError, cleanAlias, deleteAccount, saveAlias, saveShareAlbum, signInWithApple, signInWithGoogle, signOutUser } from '@/lib/auth';
 import { fb, firebaseEnabled } from '@/lib/firebase';
+import { createProfile } from '@/social/flows';
 
 /*
  * Estado de la cuenta. Iniciar sesión es opcional: sin cuenta (o sin Firebase
@@ -31,10 +32,14 @@ export type Profile = {
   alias: string;
   photoURL: string | null;
   sightings: number;
+  /** Especies distintas del cuaderno (las ven sus amigos). */
+  species: number;
   /** Comparte su álbum (especies y pegatinas) con sus amigos. */
   shareAlbum: boolean;
-  /** Código para que otra persona le añada como amigo (lo asigna el servidor). */
+  /** Código para que otra persona le añada como amigo (lo pide la app la primera vez). */
   friendCode: string | null;
+  /** false mientras es el provisional (datos de Google/Apple) y aún no llegó el de la nube. */
+  loaded: boolean;
 };
 
 type State = {
@@ -138,21 +143,43 @@ export function startAuth(): void {
       status: 'signedIn',
       user,
       // Mientras llega el perfil de la nube, lo que sabe la cuenta de Google/Apple.
-      profile: { alias: cleanAlias(user.displayName ?? '') || 'Explorador', photoURL: user.photoURL, sightings: 0, shareAlbum: false, friendCode: null },
+      profile: {
+        alias: cleanAlias(user.displayName ?? '') || 'Explorador',
+        photoURL: user.photoURL,
+        sightings: 0,
+        species: 0,
+        shareAlbum: false,
+        friendCode: null,
+        loaded: false,
+      },
     });
-    // El perfil lo crea una función al darse de alta: puede tardar un instante.
+    // La primera vez que entra una cuenta, la app crea su perfil (no hay
+    // servidor que lo haga). Solo si el servidor confirma que no existe: una
+    // lectura de la caché sin red no basta.
+    let creating = false;
     stopProfile = onSnapshot(
       doc(fb().db, 'users', u.uid),
+      { includeMetadataChanges: true },
       (snap) => {
         const d = snap.data();
-        if (!d) return;
+        if (!d) {
+          if (!snap.metadata.fromCache && !creating) {
+            creating = true;
+            void createProfile(fb().db, user).catch(() => {
+              creating = false;
+            });
+          }
+          return;
+        }
         useAuth.setState({
           profile: {
             alias: typeof d.alias === 'string' && d.alias ? d.alias : 'Explorador',
             photoURL: typeof d.photoURL === 'string' ? d.photoURL : null,
             sightings: typeof d.counters?.sightings === 'number' ? d.counters.sightings : 0,
+            species: typeof d.counters?.species === 'number' ? d.counters.species : 0,
             shareAlbum: d.shareAlbum === true,
             friendCode: typeof d.friendCode === 'string' ? d.friendCode : null,
+            loaded: true,
           },
         });
       },

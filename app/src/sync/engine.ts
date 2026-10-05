@@ -5,7 +5,7 @@ import * as Network from 'expo-network';
 import { AppState } from 'react-native';
 
 import { journal } from '@/db';
-import { fb, firebaseEnabled } from '@/lib/firebase';
+import { fb, firebaseEnabled, storageEnabled } from '@/lib/firebase';
 import { removeVoiceFile, voiceExists, voiceUri } from '@/lib/voiceFiles';
 import { useAuth } from '@/store/auth';
 import { useJournal } from '@/store/journal';
@@ -144,8 +144,10 @@ const AUDIO_TYPE: Record<string, string> = { m4a: 'audio/mp4', mp4: 'audio/mp4',
 /** Sube una fila: primero los ficheros que falten, después el documento. */
 async function pushOne(uid: string, row: LocalRow & { id: string }, state: ItemState | undefined): Promise<void> {
   // Foto.
+  // Sin Cloud Storage (plan gratuito) solo viajan los datos; si se activa, `pass`
+  // reinicia estas marcas y los ficheros se suben en la siguiente pasada.
   let photo: 1 | 2 = state?.photo_ok === 1 ? 1 : 2;
-  if (state?.photo_ok !== 1) {
+  if (state?.photo_ok !== 1 && storageEnabled) {
     if (fileExists(row.photo)) {
       await upload(storagePath.photo(uid, row.id), row.photo as string, 'image/jpeg');
       await markPhotoOk(uid, row.id);
@@ -155,7 +157,7 @@ async function pushOne(uid: string, row: LocalRow & { id: string }, state: ItemS
 
   // Pegatina: solo si es un fichero distinto de la foto.
   let sticker: 1 | 2 = state?.sticker_ok === 1 ? 1 : 2;
-  if (state?.sticker_ok !== 1) {
+  if (state?.sticker_ok !== 1 && storageEnabled) {
     const uri = row.sticker;
     if (typeof uri === 'string' && uri && uri !== row.photo && fileExists(uri)) {
       const ext = stickerExtOf(uri);
@@ -170,14 +172,14 @@ async function pushOne(uid: string, row: LocalRow & { id: string }, state: ItemS
   let voice = state?.voice_path ?? null;
   if (rel !== voiceKey(voice)) {
     const old = voiceUploaded(voice) ? voiceExtOf(voice) : null;
-    if (rel && voiceExists(rel)) {
+    if (rel && storageEnabled && voiceExists(rel)) {
       const ext = voiceExtOf(rel);
       await upload(storagePath.voice(uid, row.id, ext), voiceUri(rel), AUDIO_TYPE[ext] ?? 'audio/mp4');
       if (old && old !== ext) await removeRemote(storagePath.voice(uid, row.id, old));
       voice = rel;
     } else {
-      if (old) await removeRemote(storagePath.voice(uid, row.id, old));
-      // Sin fichero en el móvil: se anota para no reintentarlo en cada pasada.
+      if (old && storageEnabled) await removeRemote(storagePath.voice(uid, row.id, old));
+      // Sin fichero en el móvil (o sin Storage): se anota para no reintentarlo en cada pasada.
       voice = rel ? `!${rel}` : null;
     }
     await markVoicePath(uid, row.id, voice);
@@ -190,6 +192,10 @@ async function pushOne(uid: string, row: LocalRow & { id: string }, state: ItemS
 
 async function removeOne(uid: string, id: string, state: ItemState | undefined): Promise<void> {
   await deleteDoc(doc(fb().db, 'users', uid, 'sightings', id));
+  if (!storageEnabled) {
+    await forget(uid, id);
+    return;
+  }
   await removeRemote(storagePath.photo(uid, id));
   for (const ext of STICKER_EXTS) await removeRemote(storagePath.sticker(uid, id, ext));
   const voiceExts = voiceUploaded(state?.voice_path) ? [voiceExtOf(state?.voice_path)] : ['m4a'];
@@ -205,6 +211,7 @@ async function removeOne(uid: string, id: string, state: ItemState | undefined):
  */
 async function refreshVoice(uid: string, id: string, data: Record<string, unknown>, local: LocalRow, state: ItemState | undefined): Promise<string | null> {
   const current = typeof local.voice_note === 'string' && local.voice_note ? local.voice_note : null;
+  if (!storageEnabled) return current; // sin Storage no se toca la nota de voz local
   if (data.has_voice !== true) {
     if (current) removeVoiceFile(current);
     return null;
@@ -273,14 +280,14 @@ async function pull(uid: string, localById: Map<string, LocalRow & { id: string 
 
       // Es nuevo para este móvil: ficheros primero, fila después.
       let photoUri = '';
-      if (data.has_photo === true) photoUri = await download(storagePath.photo(uid, id), new File(photoDir(), `${id}.jpg`));
+      if (data.has_photo === true && storageEnabled) photoUri = await download(storagePath.photo(uid, id), new File(photoDir(), `${id}.jpg`));
       let stickerUri: string | null = null;
-      if (data.has_sticker === true) {
+      if (data.has_sticker === true && storageEnabled) {
         const ext = data.sticker_ext === 'png' ? 'png' : 'jpg';
         stickerUri = await download(storagePath.sticker(uid, id, ext), new File(photoDir(), `${id}-pegatina.${ext}`));
       }
       let voiceRel: string | null = null;
-      if (data.has_voice === true) voiceRel = await downloadVoice(uid, id, voiceExtOf(`x.${String(data.voice_ext ?? 'm4a')}`));
+      if (data.has_voice === true && storageEnabled) voiceRel = await downloadVoice(uid, id, voiceExtOf(`x.${String(data.voice_ext ?? 'm4a')}`));
 
       const values: Record<string, string | number | boolean | null> = fromRemote(data, columns);
       values.photo = photoUri;
@@ -421,6 +428,16 @@ async function pass(opts: { retryExhausted?: boolean }): Promise<void> {
     await ensureSyncTables();
     if (!(await claimNotebook(uid))) return;
     useSync.setState({ phase: 'syncing', error: null });
+    // Se activó Cloud Storage (paso a Blaze): lo ya copiado sin ficheros se repasa
+    // para subir fotos, pegatinas y notas de voz.
+    const mode = storageEnabled ? 'on' : 'off';
+    const prevMode = await getMeta(uid, 'storage_mode');
+    if (prevMode !== mode) {
+      if (prevMode === 'off' && mode === 'on') {
+        await journal().runAsync('UPDATE sync_item SET photo_ok = 0, sticker_ok = 0, voice_path = NULL WHERE uid = ?', [uid]);
+      }
+      await setMeta(uid, 'storage_mode', mode);
+    }
     const last = await getMeta(uid, 'last_sync');
     if (last && useSync.getState().lastSyncAt == null) useSync.setState({ lastSyncAt: last });
 

@@ -56,6 +56,6 @@ app/.claude/
 
 # Firebase
 .firebase/
-functions/lib/
-functions/node_modules/
+firebase/lib/
+firebase/node_modules/
 *-debug.log

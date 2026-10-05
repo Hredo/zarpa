@@ -3,18 +3,25 @@ rules_version = '2';
 /*
  * Reglas de Firestore de Zarpa.
  *
- * Principio: todo está cerrado salvo lo que cada persona hace con lo suyo.
- *   - Nadie lee ni escribe datos de otro usuario.
- *   - Lo social es solo entre amigos: no hay buscador de personas. La amistad
- *     y las solicitudes las escribe el servidor (functions/src/social.ts); el
- *     cliente solo lee lo suyo. El álbum compartido lo ven los amigos y solo
- *     si su dueño lo comparte (`shareAlbum`).
- *   - El perfil lo crea y lo borra el servidor (functions/): el cliente solo
- *     puede cambiar el alias y la foto. Los contadores los escribe una
- *     función, así que no se pueden falsear.
+ * Zarpa funciona en el plan gratuito de Firebase (Spark): no hay Cloud
+ * Functions, así que todo lo escribe la app y estas reglas son la única
+ * defensa. Principio: todo está cerrado salvo lo que cada persona hace con lo
+ * suyo.
+ *   - Nadie lee ni escribe datos de otro usuario, salvo lo social y solo con
+ *     el consentimiento del otro (ver abajo).
+ *   - El perfil lo crea su dueño con una forma fija (contadores a cero, sin
+ *     código de amigo) y luego solo cambia alias, foto, compartir, contadores
+ *     y, una sola vez, su código de amigo.
+ *   - Lo social es solo entre amigos: no hay buscador de personas. Se añade a
+ *     alguien con su código (`friendCodes/{código}` se puede leer de uno en
+ *     uno, nunca listar). Una amistad solo se apunta en la lista del otro si
+ *     el otro te lo pidió antes (`friendRequests`). El álbum compartido lo ven
+ *     los amigos y solo si su dueño lo comparte (`shareAlbum`).
  *   - Los avistamientos son una copia de la tabla local `sighting`: los campos
  *     conocidos se validan por tipo y tamaño, y se admiten hasta 40 campos para
  *     que el cuaderno gane columnas (notas, clima, audio) sin tocar las reglas.
+ *   - Borrar la cuenta lo hace la app: por eso el dueño puede borrar todo lo
+ *     suyo y retirar su rastro de las listas de sus amigos.
  */
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -49,22 +56,55 @@ service cloud.firestore {
       return !(k in d) || d[k] == null || d[k] in values;
     }
 
+    // Formatos compartidos por el perfil, el perfil público y las amistades.
+    function validAlias(a) {
+      return a is string && a.size() >= 1 && a.size() <= 40;
+    }
+    function validPhoto(p) {
+      return p == null || (p is string && p.size() <= 1000 && p.matches('https://.*'));
+    }
+    function validCount(n) {
+      return n is int && n >= 0 && n <= 10000000;
+    }
+    function validCode(c) {
+      // Mismo alfabeto que la app (social/api.ts): sin 0/O ni 1/I/L.
+      return c is string && c.matches('[ABCDEFGHJKMNPQRSTUVWXYZ2-9]{8}');
+    }
+
     // ---- Perfil ---------------------------------------------------------
     match /users/{uid} {
+      function validCounters(c) {
+        return c is map && c.keys().hasOnly(['sightings', 'species'])
+          && validCount(c.get('sightings', 0)) && validCount(c.get('species', 0));
+      }
+      // El código de amigo se pone una sola vez y solo si su índice
+      // `friendCodes/{código}` apunta a esta cuenta tras la misma escritura.
+      function friendCodeOk(before, after) {
+        return after.get('friendCode', null) == before.get('friendCode', null)
+          || (before.get('friendCode', null) == null
+              && validCode(after.get('friendCode', null))
+              && getAfter(/databases/$(database)/documents/friendCodes/$(after.friendCode)).data.uid == uid);
+      }
+
       allow read: if isOwner(uid);
-      // Crear y borrar: solo el servidor (Admin SDK se salta las reglas).
-      allow create, delete: if false;
+      // Alta: la hace la app al entrar por primera vez, con la forma de partida.
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['alias', 'photoURL', 'createdAt', 'updatedAt', 'counters', 'shareAlbum'])
+        && validAlias(request.resource.data.alias)
+        && validPhoto(request.resource.data.get('photoURL', null))
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.counters == {'sightings': 0, 'species': 0}
+        && request.resource.data.shareAlbum == false;
       allow update: if isOwner(uid)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['alias', 'photoURL', 'shareAlbum', 'updatedAt'])
-        && (!('shareAlbum' in request.resource.data) || request.resource.data.shareAlbum is bool)
-        && request.resource.data.alias is string
-        && request.resource.data.alias.size() >= 1
-        && request.resource.data.alias.size() <= 40
-        && (request.resource.data.photoURL == null
-            || (request.resource.data.photoURL is string
-                && request.resource.data.photoURL.size() <= 1000
-                && request.resource.data.photoURL.matches('https://.*')))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['alias', 'photoURL', 'shareAlbum', 'counters', 'friendCode', 'updatedAt'])
+        && validAlias(request.resource.data.alias)
+        && validPhoto(request.resource.data.get('photoURL', null))
+        && request.resource.data.get('shareAlbum', false) is bool
+        && validCounters(request.resource.data.get('counters', {}))
+        && friendCodeOk(resource.data, request.resource.data)
         && request.resource.data.updatedAt == request.time;
+      allow delete: if isOwner(uid);
 
       // Ajustes privados (idioma, modo niños, preferencias de sincronización...).
       match /private/{doc} {
@@ -72,7 +112,7 @@ service cloud.firestore {
         allow create, update: if isOwner(uid)
           && doc == 'settings'
           && request.resource.data.keys().size() <= 20;
-        allow delete: if false;
+        allow delete: if isOwner(uid);
       }
 
       // ---- Avistamientos (copia en la nube del cuaderno) -----------------
@@ -94,7 +134,7 @@ service cloud.firestore {
             && optString(d, 'model', 120)
             && optString(d, 'note', 5000)
             && d.has_photo is bool
-            // Pegatina y nota de voz (sus ficheros están en Storage).
+            // Pegatina y nota de voz (sus ficheros, en Storage si está activo).
             && optBool(d, 'has_sticker')
             && optBool(d, 'has_voice')
             && optIn(d, 'sticker_ext', ['png', 'jpg'])
@@ -120,14 +160,54 @@ service cloud.firestore {
         allow delete: if isOwner(uid);
       }
 
-      // ---- Amigos y solicitudes: solo el servidor escribe ------------------
-      match /friends/{fid} {
-        allow read: if isOwner(uid);
-        allow write: if false;
-      }
+      // ---- Solicitudes de amistad ------------------------------------------
+      // `users/{uid}/friendRequests/{fromUid}`: la escribe quien pide (fromUid),
+      // con su alias y su foto; la lee y la borra quien la recibe (uid). Quien
+      // la envió puede retirarla (también al borrar su cuenta).
       match /friendRequests/{fromUid} {
+        function validRequest(d) {
+          return d.keys().hasOnly(['from', 'alias', 'photoURL', 'at'])
+            && d.from == fromUid
+            && validAlias(d.alias)
+            && validPhoto(d.get('photoURL', null))
+            && d.at == request.time;
+        }
         allow read: if isOwner(uid);
-        allow write: if false;
+        allow get: if isOwner(fromUid);
+        allow create, update: if isOwner(fromUid) && fromUid != uid
+          && exists(/databases/$(database)/documents/users/$(uid))
+          && validRequest(request.resource.data);
+        allow delete: if isOwner(uid) || isOwner(fromUid);
+      }
+
+      // ---- Amistades --------------------------------------------------------
+      // Una ficha en cada sentido: `users/A/friends/B` y `users/B/friends/A`,
+      // con el alias y la foto del amigo. Las escribe quien acepta (B acepta la
+      // solicitud de A): la suya, y la de A solo porque A se lo pidió antes.
+      match /friends/{fid} {
+        function validFriend(d) {
+          return d.keys().hasOnly(['since', 'alias', 'photoURL'])
+            && d.since == request.time
+            && validAlias(d.alias)
+            && validPhoto(d.get('photoURL', null));
+        }
+        // `by` pidió amistad a `to` (la solicitud está en la lista de `to`).
+        function requested(by, to) {
+          return exists(/databases/$(database)/documents/users/$(to)/friendRequests/$(by));
+        }
+        allow read: if isOwner(uid);
+        // Mi lista: al aceptar su solicitud, o si ya estoy en la suya.
+        // Su lista: me apunto yo (fid) solo si él (uid) me lo pidió.
+        allow create: if fid != uid && validFriend(request.resource.data)
+          && ((isOwner(uid) && (requested(fid, uid) || exists(/databases/$(database)/documents/users/$(fid)/friends/$(uid))))
+              || (isOwner(fid) && requested(uid, fid)));
+        // Alias y foto al día: los refresca el propio amigo cuando los cambia.
+        allow update: if (isOwner(uid) || isOwner(fid))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['alias', 'photoURL'])
+          && validAlias(request.resource.data.alias)
+          && validPhoto(request.resource.data.get('photoURL', null));
+        // Dejar de ser amigos: cualquiera de los dos borra las dos fichas.
+        allow delete: if isOwner(uid) || isOwner(fid);
       }
 
       // ---- Álbum compartido con los amigos --------------------------------
@@ -151,16 +231,38 @@ service cloud.firestore {
       }
     }
 
-    // ---- Perfiles públicos: los escribe una función; los lee quien tenga cuenta
-    // (para ver quién te pide amistad). Solo alias, avatar y contadores.
+    // ---- Perfil público: alias, avatar, contadores y si comparte álbum. Lo
+    // escribe su dueño (copia de su perfil); lo lee quien tenga cuenta y sepa
+    // el uid (para ver quién te pide amistad). No se puede listar.
     match /publicProfiles/{uid} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow get: if signedIn();
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['alias', 'photoURL', 'shareAlbum', 'sightings', 'species', 'updatedAt'])
+        && validAlias(request.resource.data.alias)
+        && validPhoto(request.resource.data.get('photoURL', null))
+        && request.resource.data.shareAlbum is bool
+        && validCount(request.resource.data.sightings)
+        && validCount(request.resource.data.species)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isOwner(uid);
     }
 
-    // Índice de códigos de amigo: solo el servidor.
+    // ---- Índice de códigos de amigo: `friendCodes/{código}` → {uid}. Se lee de
+    // uno en uno (quien tiene el código), nunca se lista. Lo crea el dueño en la
+    // misma escritura que pone el código en su perfil, y lo borra al irse.
     match /friendCodes/{code} {
-      allow read, write: if false;
+      allow get: if signedIn();
+      allow create: if signedIn() && validCode(code)
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('friendCode', null) == code;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Las solicitudes que envió una cuenta (para retirarlas al borrarla).
+    match /{path=**}/friendRequests/{fromUid} {
+      allow list: if signedIn() && resource.data.from == request.auth.uid;
     }
 
     match /{document=**} {

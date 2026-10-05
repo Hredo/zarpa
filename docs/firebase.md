@@ -1,8 +1,15 @@
 # Firebase en Zarpa
 
-Proyecto: `zarpa-47a67` · Funciones en `europe-west1` · SDK: Firebase JS (v12).
+Proyecto: `zarpa-47a67` · **plan gratuito (Spark)** · Firestore en `eur3` · SDK: Firebase JS (v12).
 Iniciar sesión es opcional: sin cuenta la app funciona entera (el cuaderno vive en SQLite).
-La cuenta añade perfil, copia en la nube y, más adelante, lo social.
+La cuenta añade perfil, copia en la nube y amigos.
+
+Zarpa no usa Cloud Functions: el perfil, lo social y el borrado de cuenta los hace la
+app, y `firestore.rules` es la única defensa (cada regla tiene su prueba contra el
+emulador). Cloud Storage exige el plan Blaze: sin él (`EXPO_PUBLIC_FIREBASE_STORAGE=0`)
+la copia en la nube guarda los datos de cada avistamiento, y la foto, la pegatina y la
+nota de voz se quedan en el móvil. Si algún día se pasa a Blaze, basta con crear el
+bucket, desplegar `storage.rules` y poner la variable a `1`.
 
 ## Qué hay en el repo
 
@@ -10,8 +17,8 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
 |---|---|
 | `firebase.json`, `.firebaserc` | Configuración de la CLI (proyecto por defecto y emuladores) |
 | `firestore.rules`, `firestore.indexes.json`, `storage.rules` | Reglas estrictas: cada usuario solo lee y escribe lo suyo |
-| `functions/` | `onUserCreate`, `onSightingWrite`, `deleteAccount` y lo social (`functions/src/social.ts`) (Node 22, TypeScript, pnpm) |
-| `functions/test/` | Pruebas de las reglas y de las funciones de amigos contra los emuladores |
+| `firebase/` | Pruebas contra los emuladores (Node 22, vitest, pnpm): `test/rules.test.ts` (reglas) y `test/flows.test.ts` (los flujos de la app: alta, amigos, borrado de cuenta) |
+| `app/src/social/flows.ts` | Alta del perfil, código de amigo, solicitudes, amistades, perfil público y borrado de los datos de la cuenta (solo depende de `firebase/firestore`) |
 | `app/src/lib/firebase.ts` | Único punto de `initializeApp` |
 | `app/src/lib/auth.ts`, `app/src/store/auth.ts` | Google, Apple, cierre de sesión, borrado de cuenta |
 | `app/src/sync/` | Sincronización del cuaderno (tablas propias `sync_item` y `sync_meta`) |
@@ -20,35 +27,36 @@ La cuenta añade perfil, copia en la nube y, más adelante, lo social.
 
 ### Modelo de datos
 
-- `users/{uid}`: alias, photoURL, createdAt, updatedAt, `counters.sightings`. Lo crea la función; el cliente solo cambia alias y foto.
+- `users/{uid}`: alias, photoURL, createdAt, updatedAt, `counters` (avistamientos y especies), `shareAlbum` y `friendCode`. Lo crea la app la primera vez que entra la cuenta, con la forma de partida que exigen las reglas; después solo cambian alias, foto, compartir, contadores (tras cada sincronización) y, una vez, el código de amigo.
 - `users/{uid}/private/settings`: ajustes privados.
 - `users/{uid}/sightings/{id}`: copia de cada avistamiento (mismas columnas que la tabla local, sin rutas de ficheros; más `has_photo`, `has_sticker`, `sticker_ext`, `has_voice`, `voice_ext`, `schema`, `synced_at`). Las reglas validan también el diario (clima, momento del día, duración de la nota de voz).
-- Storage, por avistamiento: `users/{uid}/sightings/{id}.jpg` (foto, JPEG ≤ 10 MB), `{id}.sticker.png|jpg` (pegatina ≤ 10 MB) y `{id}.voice.m4a` (nota de voz, audio ≤ 5 MB; también aac, mp4, caf, 3gp).
+- Storage (solo con plan Blaze), por avistamiento: `users/{uid}/sightings/{id}.jpg` (foto, JPEG ≤ 10 MB), `{id}.sticker.png|jpg` (pegatina ≤ 10 MB) y `{id}.voice.m4a` (nota de voz, audio ≤ 5 MB; también aac, mp4, caf, 3gp).
 - Storage, `catalog/`: el catálogo de especies versionado y su `manifest.json`. Lectura pública; nadie lo escribe desde la app.
 - Lo social (amigos por código, álbum compartido, perfiles públicos): ver `docs/social.md`.
 
-## Pasos que haces tú en la consola
+## Lo que está hecho en la consola (5 de octubre de 2026)
 
-1. **Plan Blaze** (Consola de Firebase → Uso y facturación). Las funciones lo exigen. Crea una **alerta de presupuesto** (p. ej. 5 €) en Google Cloud → Facturación → Presupuestos y alertas.
-2. **Authentication** → Sign-in method: activa **Google** y **Apple**. Al activar Google, Firebase crea el cliente OAuth «web»: su ID es el `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`.
-3. **Firestore Database** → Crear base de datos en modo producción, región **eur3** (o europe-west1).
-4. **Storage** → Comenzar, misma región.
-5. **App web**: Configuración del proyecto → Tus apps → añadir app web. Copia la configuración del SDK a `app/.env` (parte de `app/.env.example`): `API_KEY`, `MESSAGING_SENDER_ID`, `APP_ID`. Son identificadores públicos, no secretos.
-6. **App Android** `com.hrval.zarpa` con su SHA-1 (Google lo exige para el inicio de sesión).
-   - Debug (keystore de `~/.android/debug.keystore`):
-     `keytool -list -v -keystore %USERPROFILE%\.android\debug.keystore -alias androiddebugkey -storepass android -keypass android`
-   - Release: `keytool -list -v -keystore <tu-keystore> -alias <alias>`. Si firmas con EAS: `pnpm dlx eas-cli@latest credentials` y copia el SHA-1 del keystore de Android.
-   - Pega cada SHA-1 en Configuración del proyecto → app Android → Huellas digitales. No hace falta descargar `google-services.json`.
-7. **App iOS** `com.hrval.zarpa`: copia su ID de cliente OAuth a `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` y pon su inverso (`com.googleusercontent.apps.XXXX`) en `app.json`, en el plugin `@react-native-google-signin/google-signin` → `iosUrlScheme` (ahora lleva un marcador `REEMPLAZAR-…`).
-8. **Apple**: en developer.apple.com crea un **Service ID** y una **clave «Sign in with Apple»** (.p8, que NO se sube al repo). En Firebase → Authentication → Apple, introduce Service ID, Team ID, Key ID y el contenido de la clave. Activa la capacidad «Sign in with Apple» en el App ID.
-9. **Desplegar** (desde la raíz del repo):
-   ```
-   pnpm dlx firebase-tools login
-   pnpm --dir functions install
-   pnpm dlx firebase-tools deploy --only firestore,storage,functions
-   ```
-   La regla de Storage que deja ver pegatinas a los amigos consulta Firestore: la CLI pedirá permiso para conectar Storage con Firestore. Acéptalo.
-   Los cambios nativos (plugins, entitlements) requieren un nuevo build de desarrollo: `pnpm exec expo run:android|ios`.
+- Plan **Spark** (gratuito). Sin facturación.
+- **Authentication** → Google activado (nombre público «Zarpa», correo de asistencia del proyecto).
+- **Firestore** en modo producción, región `eur3`.
+- **App Android** `com.hrval.zarpa` con el SHA-1 del keystore de depuración (con el que se firman los APK de prueba) y **app web** (su configuración está en `app/.env`, que no se sube).
+
+Pendiente, cuando haga falta:
+
+1. **iOS**: registrar la app iOS, copiar su ID de cliente a `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` y poner su inverso en `app.json` (`iosUrlScheme`, ahora con un marcador `REEMPLAZAR-…`).
+2. **Apple**: en developer.apple.com, un Service ID y una clave «Sign in with Apple» (.p8, que NO se sube al repo); en Firebase → Authentication → Apple, Service ID, Team ID, Key ID y la clave.
+3. **Release firmada**: añadir el SHA-1 del keystore de publicación (`keytool -list -v -keystore <tu-keystore> -alias <alias>`) en la app Android.
+
+## Desplegar
+
+Desde la raíz del repo, con la CLI autorizada (`pnpm dlx firebase-tools login`, una vez por equipo):
+
+```
+pnpm dlx firebase-tools deploy --only firestore
+```
+
+Sube las reglas y los índices (`firestore.indexes.json`: el índice de grupo de colecciones de
+`friendRequests.from`, que usa el borrado de cuenta). Nada de esto cuesta dinero en Spark.
 
 ## Publicar el catálogo en Storage
 
@@ -71,13 +79,13 @@ El cuaderno del móvil tiene dueño (la cuenta que lo sincronizó). Si entra otr
 ## Probar en local
 
 ```
-pnpm --dir functions test        # reglas contra los emuladores (necesita Java)
-pnpm --dir functions build       # compila las funciones
+pnpm --dir firebase install
+pnpm --dir firebase test         # reglas y flujos contra los emuladores (necesita Java)
 ```
 Para que la app use los emuladores: `EXPO_PUBLIC_FIREBASE_EMULATORS=1` y `pnpm dlx firebase-tools emulators:start`.
 
 ## Notas
 
 - Fotos, pegatinas y notas de voz se suben y se bajan con cada avistamiento. Si el mismo avistamiento se edita en dos móviles, gana la edición más reciente (`updated_at`).
-- Borrar la cuenta llama a `deleteAccount`, que elimina Firestore, Storage y Auth. Es obligatorio en App Store y Google Play.
+- Borrar la cuenta (obligatorio en App Store y Google Play) lo hace la app: confirma la identidad si la sesión tiene más de unos minutos, borra de Firestore todo lo suyo y su rastro en las listas de sus amigos, sus ficheros de Storage si los hay y, al final, la cuenta de Auth. Si se corta a medias se puede repetir.
 - La política de privacidad debe mencionar cuenta, fotos y ubicación almacenadas en Firebase (UE).

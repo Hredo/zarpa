@@ -4,24 +4,28 @@ Cuatro piezas, todas opcionales y pensadas para que la usen también niños:
 
 | Pieza | Qué hace | Dónde |
 |---|---|---|
-| Amigos | Se añade a alguien **solo con su código** (8 caracteres). No hay buscador de personas. | `app/src/app/amigos.tsx`, `functions/src/social.ts` |
-| Álbum compartido | Si lo activas en el perfil, tus amigos ven tus especies, cuántas veces las viste, el mes y tu pegatina. **Nunca** dónde, ni la foto completa, ni las notas de voz. | `app/src/social/`, `app/src/app/amigo/[uid].tsx` |
+| Amigos | Se añade a alguien **solo con su código** (8 caracteres). No hay buscador de personas. | `app/src/app/amigos.tsx`, `app/src/social/flows.ts` |
+| Álbum compartido | Si lo activas en el perfil, tus amigos ven tus especies, cuántas veces las viste y el mes (y tu pegatina, si hay Cloud Storage). **Nunca** dónde, ni la foto completa, ni las notas de voz. | `app/src/social/`, `app/src/app/amigo/[uid].tsx` |
 | Rarezas cerca | Inicio enseña las especies raras confirmadas a menos de 50 km en 14 días (iNaturalist). Con el aviso activado, una notificación local en segundo plano. | `app/src/lib/rarities.ts`, `app/src/lib/rarityAlerts.ts` |
 | Aportar a iNaturalist | Publica un avistamiento (foto, especie, fecha, lugar) en tu cuenta de iNaturalist. Si la comunidad lo confirma, llega a GBIF. | `app/src/lib/inat.ts`, `app/src/components/InatCard.tsx` |
 
 ## Modelo de datos (Firestore)
 
-- `users/{uid}.friendCode` y `friendCodes/{code} → {uid}`: el código lo asigna el servidor (al darse de alta, o con `getFriendCode` en cuentas antiguas). El índice inverso no lo lee nadie desde la app.
-- `users/{uid}.shareAlbum`: lo cambia el dueño desde el perfil. Al desactivarlo, `onProfileWrite` borra el álbum de la nube.
-- `publicProfiles/{uid}`: alias, avatar, contadores y si comparte. Lo escribe `onProfileWrite`; lo lee quien tenga cuenta (para ver quién te pide amistad).
-- `users/{uid}/friends/{fid}` y `users/{uid}/friendRequests/{fromUid}`: solo los escriben las funciones `sendFriendRequest`, `respondFriendRequest` y `removeFriend`. Cada persona lee los suyos.
+Sin Cloud Functions (plan gratuito): cada escritura que toca a dos personas la hace el
+móvil de una de ellas, y `firestore.rules` comprueba que la otra dio su consentimiento.
+
+- `users/{uid}.friendCode` y `friendCodes/{code} → {uid}`: la app pide un código la primera vez y escribe los dos en el mismo lote; las reglas solo dejan ponerlo una vez y solo si el índice apunta a esa cuenta. El índice se lee de uno en uno (quien tiene el código), nunca se lista.
+- `users/{uid}/friendRequests/{fromUid}`: la escribe quien pide (a su nombre, con su alias y foto, a una cuenta que existe); la lee y la borra quien la recibe; quien la envió puede retirarla.
+- `users/{uid}/friends/{fid}`: una ficha en cada sentido. Al aceptar, quien recibe la solicitud escribe las dos; la del otro solo se admite porque hay una solicitud suya. Cada uno refresca su alias en la lista del otro; cualquiera de los dos rompe la amistad.
+- `users/{uid}.shareAlbum`: lo cambia el dueño desde el perfil. Al desactivarlo, la app borra el álbum de la nube.
+- `publicProfiles/{uid}`: alias, avatar, contadores y si comparte. Lo escribe su dueño cuando cambia su perfil; lo lee quien tenga cuenta y sepa el uid (para ver quién te pide amistad). No se lista.
 - `users/{uid}/album/{speciesId}`: `{species_id, count, first, last, sticker, sticker_ext, updated_at}`. Lo escribe el dueño (si comparte); lo leen sus amigos. Las reglas rechazan cualquier otro campo (por ejemplo, coordenadas).
-- Storage: los amigos de alguien que comparte pueden leer sus `…/{id}.sticker.png|jpg`, nada más. La regla consulta Firestore (`firestore.exists`/`firestore.get`): al desplegar, la CLI pide permiso para que Storage lea Firestore; acéptalo.
-- Al borrar la cuenta, `cleanupSocial` retira sus amistades del otro lado, las solicitudes que envió y su código.
+- Storage (solo con plan Blaze): los amigos de alguien que comparte pueden leer sus `…/{id}.sticker.png|jpg`, nada más. Sin Storage, el álbum enseña la foto del catálogo.
+- Al borrar la cuenta, la app retira sus amistades del otro lado, las solicitudes que envió (consulta de grupo de colecciones sobre `friendRequests.from`), su código y su perfil público.
 
-Límites: 200 amigos y 50 solicitudes pendientes por persona.
+Límites (los comprueba la app): 200 amigos por persona.
 
-Pruebas: `pnpm --dir functions test` (reglas y funciones contra los emuladores).
+Pruebas: `pnpm --dir firebase test` (reglas y flujos de la app contra los emuladores).
 
 ## Rarezas
 

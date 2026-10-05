@@ -4,7 +4,6 @@ import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 // @ts-expect-error: los tipos públicos de firebase/auth no la declaran.
 import { connectAuthEmulator, getReactNativePersistence, initializeAuth, getAuth, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
-import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase/functions';
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 import { Platform } from 'react-native';
 
@@ -28,10 +27,20 @@ const config = {
 
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId && config.appId);
 const useEmulators = process.env.EXPO_PUBLIC_FIREBASE_EMULATORS === '1';
+
+/*
+ * Zarpa funciona en el plan gratuito de Firebase (Spark): Auth, Firestore y
+ * Hosting (el catálogo de especies). No usa Cloud Functions: el perfil, lo
+ * social y el borrado de cuenta los hace la app y los protegen las reglas.
+ * Cloud Storage exige el plan Blaze; sin él, la copia en la nube guarda los
+ * datos de cada avistamiento, pero la foto, la pegatina y la nota de voz se
+ * quedan en el móvil. Con los emuladores se da por activo.
+ */
+export const storageEnabled = firebaseEnabled && (useEmulators || process.env.EXPO_PUBLIC_FIREBASE_STORAGE === '1');
 /** En el emulador de Android el host del PC es 10.0.2.2. */
 const EMU_HOST = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
 
-let cached: { app: FirebaseApp; auth: Auth; db: Firestore; storage: FirebaseStorage; functions: Functions } | null = null;
+let cached: { app: FirebaseApp; auth: Auth; db: Firestore; storage: FirebaseStorage } | null = null;
 
 /** Servicios de Firebase. Lanza si la configuración no está: comprueba `firebaseEnabled` antes. */
 export function fb() {
@@ -42,13 +51,11 @@ export function fb() {
   const auth = first ? initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) }) : getAuth(app);
   const db = getFirestore(app);
   const storage = getStorage(app);
-  const functions = getFunctions(app, 'europe-west1');
   if (first && useEmulators) {
     connectAuthEmulator(auth, `http://${EMU_HOST}:9099`, { disableWarnings: true });
     connectFirestoreEmulator(db, EMU_HOST, 8080);
     connectStorageEmulator(storage, EMU_HOST, 9199);
-    connectFunctionsEmulator(functions, EMU_HOST, 5001);
   }
-  cached = { app, auth, db, storage, functions };
+  cached = { app, auth, db, storage };
   return cached;
 }

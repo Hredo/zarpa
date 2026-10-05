@@ -1,5 +1,5 @@
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { deleteObject, getBytes, ref, uploadBytes } from 'firebase/storage';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,6 +12,16 @@ import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 
 const root = resolve(__dirname, '..', '..');
 let env: RulesTestEnvironment;
+
+const profile = (alias: string, over: Record<string, unknown> = {}) => ({
+  alias,
+  photoURL: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  counters: { sightings: 0, species: 0 },
+  shareAlbum: false,
+  ...over,
+});
 
 const sighting = (over: Record<string, unknown> = {}) => ({
   species_id: 123,
@@ -46,10 +56,10 @@ afterAll(async () => {
 beforeEach(async () => {
   await env.clearFirestore();
   await env.clearStorage();
-  // El perfil lo crea el servidor: aquí se siembra saltándose las reglas.
+  // Perfiles ya creados (la creación tiene sus propias pruebas).
   await env.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'users/ana'), { alias: 'Ana', photoURL: null, createdAt: new Date(), counters: { sightings: 0 } });
-    await setDoc(doc(ctx.firestore(), 'users/bea'), { alias: 'Bea', photoURL: null, createdAt: new Date(), counters: { sightings: 0 } });
+    await setDoc(doc(ctx.firestore(), 'users/ana'), profile('Ana'));
+    await setDoc(doc(ctx.firestore(), 'users/bea'), profile('Bea'));
   });
 });
 
@@ -58,14 +68,38 @@ const bea = () => env.authenticatedContext('bea').firestore();
 const anon = () => env.unauthenticatedContext().firestore();
 
 describe('perfil', () => {
+  const cai = () => env.authenticatedContext('cai').firestore();
+  const fresh = (over: Record<string, unknown> = {}) => ({
+    alias: 'Cai',
+    photoURL: 'https://lh3.googleusercontent.com/a/cai',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    counters: { sightings: 0, species: 0 },
+    shareAlbum: false,
+    ...over,
+  });
+
   it('el dueño lee su perfil; los demás y los anónimos no', async () => {
     await assertSucceeds(getDoc(doc(ana(), 'users/ana')));
     await assertFails(getDoc(doc(bea(), 'users/ana')));
     await assertFails(getDoc(doc(anon(), 'users/ana')));
   });
 
+  it('la app crea el perfil al entrar, solo con la forma de partida', async () => {
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ counters: { sightings: 99, species: 0 } })));
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ shareAlbum: true })));
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ friendCode: 'ABCDEFGH' })));
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ admin: true })));
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ createdAt: new Date(2020, 0, 1) })));
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ alias: '' })));
+    await assertFails(setDoc(doc(cai(), 'users/cai'), fresh({ photoURL: 'http://inseguro.test/a.jpg' })));
+    await assertFails(setDoc(doc(ana(), 'users/cai'), fresh()));
+    await assertSucceeds(setDoc(doc(cai(), 'users/cai'), fresh()));
+  });
+
   it('el dueño cambia alias y foto, con updatedAt del servidor', async () => {
     await assertSucceeds(updateDoc(doc(ana(), 'users/ana'), { alias: 'Ana M.', photoURL: 'https://x.test/a.jpg', updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { alias: 'Ana M.', updatedAt: new Date() }));
   });
 
   it('rechaza alias vacío, largo o de otro tipo', async () => {
@@ -74,14 +108,21 @@ describe('perfil', () => {
     await assertFails(updateDoc(doc(ana(), 'users/ana'), { alias: 7, updatedAt: serverTimestamp() }));
   });
 
-  it('no deja falsear contadores ni la fecha de alta', async () => {
-    await assertFails(updateDoc(doc(ana(), 'users/ana'), { 'counters.sightings': 9999, updatedAt: serverTimestamp() }));
-    await assertFails(updateDoc(doc(ana(), 'users/ana'), { createdAt: new Date(), updatedAt: serverTimestamp() }));
+  it('los contadores los pone la app tras sincronizar, siempre enteros y no negativos', async () => {
+    await assertSucceeds(updateDoc(doc(ana(), 'users/ana'), { counters: { sightings: 12, species: 5 }, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { counters: { sightings: -1, species: 5 }, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { counters: { sightings: 1.5, species: 1 }, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { counters: { sightings: 1, species: 1, medals: 9 }, updatedAt: serverTimestamp() }));
   });
 
-  it('el cliente no crea ni borra perfiles', async () => {
-    await assertFails(setDoc(doc(env.authenticatedContext('cai').firestore(), 'users/cai'), { alias: 'Cai' }));
-    await assertFails(deleteDoc(doc(ana(), 'users/ana')));
+  it('no deja cambiar la fecha de alta ni añadir campos', async () => {
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { createdAt: new Date(), updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ana(), 'users/ana'), { role: 'admin', updatedAt: serverTimestamp() }));
+  });
+
+  it('el dueño borra su perfil (al borrar la cuenta); nadie más', async () => {
+    await assertFails(deleteDoc(doc(bea(), 'users/ana')));
+    await assertSucceeds(deleteDoc(doc(ana(), 'users/ana')));
   });
 
   it('un usuario no toca el perfil de otro', async () => {
@@ -96,6 +137,8 @@ describe('ajustes privados', () => {
     await assertFails(getDoc(doc(bea(), 'users/ana/private/settings')));
     await assertFails(setDoc(doc(bea(), 'users/ana/private/settings'), { kids: true }));
     await assertFails(setDoc(doc(ana(), 'users/ana/private/otro'), { a: 1 }));
+    await assertFails(deleteDoc(doc(bea(), 'users/ana/private/settings')));
+    await assertSucceeds(deleteDoc(doc(ana(), 'users/ana/private/settings')));
   });
 });
 
@@ -193,17 +236,20 @@ describe('lo social', () => {
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       const f = ctx.firestore();
-      await setDoc(doc(f, 'users/ana'), { alias: 'Ana', photoURL: null, createdAt: new Date(), counters: { sightings: 0 }, shareAlbum: true });
-      await setDoc(doc(f, 'users/ana/friends/bea'), { alias: 'Bea' });
-      await setDoc(doc(f, 'users/bea/friends/ana'), { alias: 'Ana' });
+      await setDoc(doc(f, 'users/ana'), profile('Ana', { shareAlbum: true, friendCode: 'ABCDEFGH' }));
+      await setDoc(doc(f, 'users/cai'), profile('Cai'));
+      await setDoc(doc(f, 'users/ana/friends/bea'), { alias: 'Bea', photoURL: null, since: new Date() });
+      await setDoc(doc(f, 'users/bea/friends/ana'), { alias: 'Ana', photoURL: null, since: new Date() });
       await setDoc(doc(f, 'users/ana/album/42'), album());
-      await setDoc(doc(f, 'users/ana/friendRequests/cai'), { from: 'cai', alias: 'Cai' });
-      await setDoc(doc(f, 'publicProfiles/ana'), { alias: 'Ana', shareAlbum: true });
-      await setDoc(doc(f, 'friendCodes/ABCDEFGH'), { uid: 'ana' });
+      await setDoc(doc(f, 'users/ana/friendRequests/cai'), { from: 'cai', alias: 'Cai', photoURL: null, at: new Date() });
+      await setDoc(doc(f, 'publicProfiles/ana'), { alias: 'Ana', photoURL: null, shareAlbum: true, sightings: 0, species: 0, updatedAt: new Date() });
+      await setDoc(doc(f, 'friendCodes/ABCDEFGH'), { uid: 'ana', createdAt: new Date() });
     });
   });
 
   const cai = () => env.authenticatedContext('cai').firestore();
+  const request = (from: string, alias: string) => ({ from, alias, photoURL: null, at: serverTimestamp() });
+  const edge = (alias: string) => ({ alias, photoURL: null, since: serverTimestamp() });
 
   it('el dueño activa y desactiva compartir su álbum', async () => {
     await assertSucceeds(updateDoc(doc(ana(), 'users/ana'), { shareAlbum: false, updatedAt: serverTimestamp() }));
@@ -232,20 +278,100 @@ describe('lo social', () => {
     await assertSucceeds(deleteDoc(doc(ana(), 'users/ana/album/42')));
   });
 
-  it('amistades y solicitudes: se leen las propias y no se escriben desde la app', async () => {
-    await assertSucceeds(getDoc(doc(ana(), 'users/ana/friends/bea')));
-    await assertSucceeds(getDoc(doc(ana(), 'users/ana/friendRequests/cai')));
-    await assertFails(getDoc(doc(bea(), 'users/ana/friendRequests/cai')));
-    await assertFails(setDoc(doc(cai(), 'users/ana/friends/cai'), { alias: 'Cai' }));
-    await assertFails(setDoc(doc(cai(), 'users/ana/friendRequests/cai'), { from: 'cai' }));
-    await assertFails(deleteDoc(doc(bea(), 'users/bea/friends/ana')));
+  it('código de amigo: se pone una vez, junto con su índice, y no se puede robar', async () => {
+    const claim = (db: ReturnType<typeof cai>, uid: string, code: string) => {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'friendCodes', code), { uid, createdAt: serverTimestamp() });
+      batch.update(doc(db, 'users', uid), { friendCode: code, updatedAt: serverTimestamp() });
+      return batch.commit();
+    };
+    // El de otra persona, o un código con letras que confunden: no.
+    await assertFails(claim(cai(), 'cai', 'ABCDEFGH'));
+    await assertFails(claim(cai(), 'cai', 'ABCDEFG0'));
+    // Solo el índice, sin el perfil (o al revés): no.
+    await assertFails(setDoc(doc(cai(), 'friendCodes/CANCAN22'), { uid: 'cai', createdAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(cai(), 'users/cai'), { friendCode: 'CANCAN22', updatedAt: serverTimestamp() }));
+    // A nombre de otro: no.
+    await assertFails(
+      (async () => {
+        const c = cai();
+        const batch = writeBatch(c);
+        batch.set(doc(c, 'friendCodes/CANCAN22'), { uid: 'bea', createdAt: serverTimestamp() });
+        batch.update(doc(c, 'users/cai'), { friendCode: 'CANCAN22', updatedAt: serverTimestamp() });
+        await batch.commit();
+      })(),
+    );
+    await assertSucceeds(claim(cai(), 'cai', 'CANCAN22'));
+    // Ya tiene uno: no puede cambiarlo.
+    await assertFails(claim(cai(), 'cai', 'CANCAN33'));
   });
 
-  it('perfiles públicos: los lee quien tiene cuenta; nadie los escribe; los códigos son secretos', async () => {
+  it('los códigos se leen de uno en uno, nunca se listan', async () => {
+    await assertSucceeds(getDoc(doc(cai(), 'friendCodes/ABCDEFGH')));
+    await assertFails(getDoc(doc(anon(), 'friendCodes/ABCDEFGH')));
+    await assertFails(getDocs(collection(cai(), 'friendCodes')));
+    await assertFails(deleteDoc(doc(cai(), 'friendCodes/ABCDEFGH')));
+    await assertSucceeds(deleteDoc(doc(ana(), 'friendCodes/ABCDEFGH')));
+  });
+
+  it('solicitudes: las escribe quien pide, a su nombre, a una cuenta que existe', async () => {
+    await assertSucceeds(setDoc(doc(cai(), 'users/bea/friendRequests/cai'), request('cai', 'Cai')));
+    await assertFails(setDoc(doc(cai(), 'users/bea/friendRequests/ana'), request('ana', 'Ana')));
+    await assertFails(setDoc(doc(cai(), 'users/bea/friendRequests/cai'), request('ana', 'Cai')));
+    await assertFails(setDoc(doc(cai(), 'users/nadie/friendRequests/cai'), request('cai', 'Cai')));
+    await assertFails(setDoc(doc(cai(), 'users/cai/friendRequests/cai'), request('cai', 'Cai')));
+    await assertFails(setDoc(doc(cai(), 'users/bea/friendRequests/cai'), { ...request('cai', 'Cai'), lat: 40 }));
+  });
+
+  it('solicitudes: las lee quien las recibe; quien las envía solo la suya', async () => {
+    await assertSucceeds(getDoc(doc(ana(), 'users/ana/friendRequests/cai')));
+    await assertSucceeds(getDoc(doc(cai(), 'users/ana/friendRequests/cai')));
+    await assertFails(getDoc(doc(bea(), 'users/ana/friendRequests/cai')));
+    await assertFails(getDocs(collection(cai(), 'users/ana/friendRequests')));
+    await assertSucceeds(getDocs(query(collectionGroup(cai(), 'friendRequests'), where('from', '==', 'cai'))));
+    await assertFails(getDocs(query(collectionGroup(cai(), 'friendRequests'), where('from', '==', 'bea'))));
+  });
+
+  it('aceptar: quien recibe la solicitud apunta la amistad en las dos listas', async () => {
+    const a = ana();
+    const batch = writeBatch(a);
+    batch.set(doc(a, 'users/ana/friends/cai'), edge('Cai'));
+    batch.set(doc(a, 'users/cai/friends/ana'), edge('Ana'));
+    batch.delete(doc(a, 'users/ana/friendRequests/cai'));
+    await assertSucceeds(batch.commit());
+  });
+
+  it('sin solicitud nadie se cuela en la lista de otro', async () => {
+    // Cai no puede apuntarse en la de Bea, ni a Bea en la suya, sin que Bea se lo pida.
+    await assertFails(setDoc(doc(cai(), 'users/bea/friends/cai'), edge('Cai')));
+    await assertFails(setDoc(doc(cai(), 'users/cai/friends/bea'), edge('Bea')));
+    // Ana no aceptó a Cai: Cai no se apunta en la de Ana aunque le pidiera amistad.
+    await assertFails(setDoc(doc(cai(), 'users/ana/friends/cai'), edge('Cai')));
+    // Fecha falsa o campos de más.
+    await assertFails(setDoc(doc(ana(), 'users/ana/friends/cai'), { alias: 'Cai', photoURL: null, since: new Date() }));
+    await assertFails(setDoc(doc(ana(), 'users/ana/friends/cai'), { ...edge('Cai'), species: 3 }));
+  });
+
+  it('cada amigo refresca su alias en la lista del otro; y cualquiera de los dos rompe la amistad', async () => {
+    await assertSucceeds(updateDoc(doc(bea(), 'users/ana/friends/bea'), { alias: 'Bea R.' }));
+    await assertFails(updateDoc(doc(bea(), 'users/ana/friends/bea'), { since: new Date() }));
+    await assertFails(updateDoc(doc(cai(), 'users/ana/friends/bea'), { alias: 'Falsa' }));
+    await assertFails(deleteDoc(doc(cai(), 'users/ana/friends/bea')));
+    await assertSucceeds(deleteDoc(doc(bea(), 'users/ana/friends/bea')));
+    await assertSucceeds(deleteDoc(doc(bea(), 'users/bea/friends/ana')));
+  });
+
+  it('perfiles públicos: los escribe su dueño, con forma fija; los lee quien tiene cuenta, de uno en uno', async () => {
+    const pub = { alias: 'Bea', photoURL: null, shareAlbum: false, sightings: 3, species: 2, updatedAt: serverTimestamp() };
+    await assertSucceeds(setDoc(doc(bea(), 'publicProfiles/bea'), pub));
+    await assertFails(setDoc(doc(cai(), 'publicProfiles/bea'), pub));
+    await assertFails(setDoc(doc(bea(), 'publicProfiles/bea'), { ...pub, email: 'bea@x.test' }));
+    await assertFails(setDoc(doc(bea(), 'publicProfiles/bea'), { ...pub, sightings: -3 }));
     await assertSucceeds(getDoc(doc(cai(), 'publicProfiles/ana')));
     await assertFails(getDoc(doc(anon(), 'publicProfiles/ana')));
-    await assertFails(setDoc(doc(ana(), 'publicProfiles/ana'), { alias: 'Ana' }));
-    await assertFails(getDoc(doc(cai(), 'friendCodes/ABCDEFGH')));
+    await assertFails(getDocs(collection(cai(), 'publicProfiles')));
+    await assertFails(deleteDoc(doc(cai(), 'publicProfiles/ana')));
+    await assertSucceeds(deleteDoc(doc(ana(), 'publicProfiles/ana')));
     await assertFails(setDoc(doc(ana(), 'cualquiera/x'), { a: 1 }));
   });
 

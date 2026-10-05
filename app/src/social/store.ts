@@ -1,17 +1,24 @@
-import { collection, doc, onSnapshot, orderBy, query, type Unsubscribe } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, type Unsubscribe } from 'firebase/firestore';
 import { create } from 'zustand';
 
+import { journal } from '@/db';
 import { fb, firebaseEnabled } from '@/lib/firebase';
 import { useAuth } from '@/store/auth';
 import { useSync } from '@/sync/store';
 
 import { forgetPublishedAlbum, publishAlbum } from './album';
 import { getFriendCode } from './api';
+import { publishPublicProfile, refreshFriendEdges, withdrawAlbum, type PublicProfile } from './flows';
 
 /*
  * Estado social en vivo: amigos y solicitudes (escuchas de Firestore mientras
  * haya cuenta) y publicación del álbum compartido después de cada
  * sincronización correcta, si la persona lo comparte.
+ *
+ * Sin Cloud Functions, la app hace lo que antes hacía el servidor: pone los
+ * contadores del perfil tras sincronizar, copia lo público a
+ * `publicProfiles/{uid}`, refresca su alias en la lista de sus amigos y retira
+ * el álbum de la nube al dejar de compartirlo.
  */
 
 export type Friend = { uid: string; alias: string; photoURL: string | null; species: number | null; shareAlbum: boolean };
@@ -128,7 +135,7 @@ export function startSocial(): void {
     });
   });
 
-  // El álbum se publica tras cada sincronización correcta (las pegatinas ya están en Storage).
+  // El álbum se publica tras cada sincronización correcta (y las pegatinas, si hay Storage).
   let wasSharing = false;
   const maybePublish = () => {
     const { user, profile } = useAuth.getState();
@@ -140,13 +147,46 @@ export function startSocial(): void {
         .catch(() => useSocial.setState({ albumError: 'No se pudo actualizar tu álbum compartido. Se reintentará.' }));
     } else if (wasSharing) {
       wasSharing = false;
-      void forgetPublishedAlbum(user.uid);
+      void withdrawAlbum(fb().db, user.uid)
+        .then(() => forgetPublishedAlbum(user.uid))
+        .catch(() => {});
     }
   };
   let lastPhase = useSync.getState().phase;
   useSync.subscribe((s) => {
-    if (s.phase === 'idle' && lastPhase === 'syncing') maybePublish();
+    if (s.phase === 'idle' && lastPhase === 'syncing') {
+      maybePublish();
+      void updateCounters();
+    }
     lastPhase = s.phase;
+  });
+
+  // Lo público del perfil, a `publicProfiles` cada vez que cambia; y el alias
+  // y la foto, también en la ficha que tienen de ti tus amigos.
+  let published: { uid: string; json: string } | null = null;
+  let shown: { uid: string; alias: string; photoURL: string | null } | null = null;
+  useAuth.subscribe((s) => {
+    const { user, profile } = s;
+    if (!user || !profile || !profile.loaded) return;
+    const pub: PublicProfile = {
+      alias: profile.alias,
+      photoURL: profile.photoURL,
+      shareAlbum: profile.shareAlbum,
+      sightings: profile.sightings,
+      species: profile.species,
+    };
+    const json = JSON.stringify(pub);
+    if (published?.uid !== user.uid || published.json !== json) {
+      published = { uid: user.uid, json };
+      void publishPublicProfile(fb().db, user.uid, pub).catch(() => {
+        published = null;
+      });
+    }
+    if (shown?.uid === user.uid && (shown.alias !== profile.alias || shown.photoURL !== profile.photoURL)) {
+      const friends = useSocial.getState().friends.map((f) => f.uid);
+      void refreshFriendEdges(fb().db, user.uid, friends, profile.alias, profile.photoURL);
+    }
+    shown = { uid: user.uid, alias: profile.alias, photoURL: profile.photoURL };
   });
   let lastShare: boolean | null = null;
   useAuth.subscribe((s) => {
@@ -156,4 +196,20 @@ export function startSocial(): void {
     lastShare = share;
     if (before !== null || share) maybePublish();
   });
+}
+
+/** Avistamientos y especies del cuaderno, al perfil (los ven tus amigos). */
+async function updateCounters(): Promise<void> {
+  const { user, profile } = useAuth.getState();
+  if (!user || !profile?.loaded) return;
+  try {
+    const row = await journal().getFirstAsync<{ n: number; s: number }>(
+      'SELECT COUNT(*) AS n, COUNT(DISTINCT species_id) AS s FROM sighting',
+    );
+    const next = { sightings: row?.n ?? 0, species: row?.s ?? 0 };
+    if (next.sightings === profile.sightings && next.species === profile.species) return;
+    await updateDoc(doc(fb().db, 'users', user.uid), { counters: next, updatedAt: serverTimestamp() });
+  } catch {
+    // Sin red o sin perfil todavía: se reintenta tras la próxima sincronización.
+  }
 }
