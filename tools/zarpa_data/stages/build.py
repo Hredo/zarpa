@@ -507,6 +507,9 @@ def run() -> None:
     for g in _read("gbif_media.jsonl"):
         if g.get("photo"):
             extra_photos.setdefault(g["inat_id"], []).append(g["photo"])
+    for g in _read("obs_photos.jsonl"):
+        if g.get("photo"):
+            extra_photos.setdefault(g["inat_id"], []).append(g["photo"])
     wiki_images = {p["inat_id"]: p for p in _read("wiki_images.jsonl")}
     sizes = {p["inat_id"]: p for p in _read("size.jsonl")}
     nm.learn_vocabulary([x for n in inat_names.values() for x in n.get("es", [])] + [x for v in gbif_names.values() for x in v])

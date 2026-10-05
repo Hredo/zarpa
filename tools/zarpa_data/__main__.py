@@ -30,6 +30,7 @@ STAGES = [
     "photos",
     "wiki_images",
     "gbif_media",
+    "obs_photos",
     "rank_names",
     "build",
     "cloud",

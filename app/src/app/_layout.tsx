@@ -91,6 +91,7 @@ export default function RootLayout() {
           <Stack.Screen name="perfil" />
           <Stack.Screen name="amigos" />
           <Stack.Screen name="amigo/[uid]" />
+          <Stack.Screen name="inaturalist" options={{ presentation: 'transparentModal', animation: 'none' }} />
           <Stack.Screen name="bienvenida" options={{ presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }} />
         </Stack>
         <WelcomeGate />
