@@ -24,7 +24,15 @@ STAGES = [
     "breeds",
     "urban",
     "depth",
+    "size",
+    "inat_names",
+    "gbif_names",
+    "photos",
+    "wiki_images",
+    "gbif_media",
+    "rank_names",
     "build",
+    "cloud",
 ]
 
 

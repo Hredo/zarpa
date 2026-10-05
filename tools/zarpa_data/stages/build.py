@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import shutil
 import sqlite3
 import unicodedata
@@ -30,10 +32,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import config
+from .. import names as nm
 from ..presence import species_by_gbif_key, species_countries
 from ..taxonomy import GROUP_LABEL, group_of, rarity_of
 
 APP = config.ROOT.parent / "app"
+
+# Versión del esquema del catálogo: súbela cuando la app necesite tablas o
+# columnas nuevas. La app solo acepta catálogos descargados de su mismo esquema
+# (un catálogo nuevo con columnas que una app vieja no espera no se le ofrece).
+CATALOG_SCHEMA = 3
 
 SCHEMA = """
 PRAGMA journal_mode = OFF;
@@ -75,13 +83,20 @@ CREATE TABLE species (
   enwiki TEXT,
   taxo TEXT NOT NULL,               -- cruce con GBIF: accepted | doubtful | synonym
   gbif_name TEXT,                   -- nombre aceptado en GBIF si difiere
-  seq INTEGER NOT NULL              -- orden taxonómico (número del cromo)
+  seq INTEGER NOT NULL,             -- orden taxonómico (número del cromo)
+  mass_g REAL,                      -- masa corporal (g), verificada (etapa size); NULL = sin dato fiable
+  length_mm REAL                    -- longitud máxima (mm); el tipo (TL, SVL, SCL) está en provenance.note
 );
 CREATE INDEX species_grp ON species (grp, seq);
 
 -- Clases, órdenes y familias, una sola vez (con 280 000 especies, repetir sus
 -- nombres en cada fila pesaba decenas de MB).
-CREATE TABLE taxon (id INTEGER PRIMARY KEY, rank TEXT NOT NULL, sci TEXT NOT NULL, es TEXT);
+CREATE TABLE taxon (
+  id INTEGER PRIMARY KEY, rank TEXT NOT NULL, sci TEXT NOT NULL,
+  es TEXT,                          -- nombre en español (iNaturalist o Wikidata); NULL = enseñar el científico
+  rep_id INTEGER,                   -- especie con foto que representa al grupo (la más observada)
+  img TEXT, img_ratio REAL          -- su imagen principal (atribución en la tabla image, con id = rep_id)
+);
 
 -- Lo que leen la app y las herramientas: la especie con los nombres de su
 -- clasificación, como si estuvieran en la fila.
@@ -183,7 +198,10 @@ CREATE VIRTUAL TABLE breed_fts USING fts5(
   tokenize = 'unicode61 remove_diacritics 2'
 );
 
-CREATE TABLE grp (code TEXT PRIMARY KEY, label TEXT NOT NULL, position INTEGER NOT NULL, total INTEGER NOT NULL);
+CREATE TABLE grp (
+  code TEXT PRIMARY KEY, label TEXT NOT NULL, position INTEGER NOT NULL, total INTEGER NOT NULL,
+  rep_id INTEGER, img TEXT, img_ratio REAL  -- especie con foto que representa al grupo
+);
 
 CREATE VIRTUAL TABLE species_fts USING fts5(
   name_es, name_en, sci, aliases,
@@ -302,37 +320,9 @@ def _norm(s: str | None) -> str:
 
 
 # Nombres en inglés colados en la lista en español de iNaturalist («Giant
-# pangasius», «Small Wood-Nymph», «Maki Rat», «Mono Tit»). En español el nombre
-# empieza por el sustantivo; en inglés, por el adjetivo, y el sustantivo inglés
-# va al final sin «de» delante (los epónimos «Tejedor de Fox» no cuentan).
-# Revisado a mano sobre los ~28 000 nombres de 2026-10-04: 8 casos, todos inglés.
-_EN_FIRST = {
-    "giant", "common", "lesser", "greater", "northern", "southern", "eastern", "western",
-    "spotted", "striped", "black", "white", "red", "blue", "green", "yellow", "brown",
-    "grey", "gray", "little", "small", "large", "long", "short", "great", "american",
-    "african", "asian", "european", "mayan", "dwarf", "pygmy", "golden", "silver",
-    "banded", "crested", "tufted", "false", "true", "mountain", "sea", "river", "water",
-    "wood", "tree",
-}
-_EN_LAST = {
-    "rat", "tit", "fish", "bird", "frog", "snake", "lizard", "shark", "moth", "butterfly",
-    "beetle", "bee", "wasp", "ant", "fly", "spider", "crab", "shrimp", "mouse", "squirrel",
-    "monkey", "deer", "owl", "hawk", "eagle", "duck", "goose", "dove", "pigeon", "warbler",
-    "sparrow", "finch", "thrush", "wren", "snail", "slug", "worm", "bat", "toad", "turtle",
-    "whale", "dolphin", "seal", "fox", "wolf", "bear", "cat", "dog", "horse", "nymph",
-    "skipper", "bug", "halfbeak", "catfish", "lemur",
-}
-_LINK = {"de", "del", "la", "las", "los", "monte", "isla", "rio", "lago", "sierra", "cerro"}
-
-
-def _looks_english(name: str) -> bool:
-    words = _norm(name).split()
-    if not words:
-        return False
-    if words[0] in _EN_FIRST:
-        return True
-    # «Rana lémur» (Agalychnis lemur) es español aunque lleve el sustantivo al final.
-    return len(words) >= 2 and words[-1] in _EN_LAST and words[-2] not in _LINK and words[0] not in {"rana", "ranita"}
+# pangasius», «Small Wood-Nymph», «Maki Rat», «Mono Tit»): el filtro vive en
+# `zarpa_data/names.py`, junto con la elección del nombre.
+_looks_english = nm.looks_english
 
 
 def _verify_iucn(taxon: dict | None, wd: dict | None) -> tuple[str | None, str, str | None]:
@@ -382,36 +372,60 @@ def _iucn_from_name(name: str) -> str | None:
     return table.get(name.upper())
 
 
-def _verify_name_es(u: dict, taxon: dict | None, wd: dict | None) -> tuple[str | None, str, list[str]]:
+def _verify_name_es(
+    u: dict,
+    taxon: dict | None,
+    wd: dict | None,
+    inat: dict | None = None,
+    gbif_spa: list[str] | None = None,
+    wiki: dict | None = None,
+) -> tuple[str | None, str, list[str]]:
     """
-    Nombre común en español.
-
-    La fuente principal es iNaturalist con los nombres de España (sus listas las
-    mantienen conservadores y muchas siguen a SEO/BirdLife u otras sociedades).
-    Se contrasta con Wikidata (etiqueta y P1843). El nombre se muestra si viene
-    de iNaturalist; la procedencia indica si Wikidata lo confirma. Los demás
-    nombres de Wikidata se guardan como alias para la búsqueda.
+    Nombre común en español. Solo de fuentes que lo escriben en español (nunca
+    traducido): iNaturalist (léxico español, España primero), Wikidata (P1843 y
+    etiqueta es distinta del nombre científico) y GBIF (vernáculos `spa`).
+    Ver `zarpa_data/names.py` para el orden y los filtros.
     """
-    name = (taxon or {}).get("name_es") or u.get("name_es")
-    aliases: list[str] = []
-    wd_names: list[str] = []
-    if wd:
-        wd_names = [n for n in [wd.get("label_es"), *wd.get("common_es", [])] if n]
-    if name and _norm(name) == _norm(u["name"]):
-        # A veces el «nombre común» es el científico repetido: no es un nombre.
-        name = None
-    if name and _looks_english(name):
-        name = None
-    srcs = "inat" if name else ""
-    if name and any(_norm(n) == _norm(name) for n in wd_names):
-        srcs = "inat,wikidata"
-    for n in wd_names:
-        if _norm(n) != _norm(name) and _norm(n) != _norm(u["name"]) and n not in aliases:
-            aliases.append(n)
-    return name, srcs, aliases
+    legacy = (taxon or {}).get("name_es") or u.get("name_es")
+    if inat is None:
+        # Sin la etapa inat_names el «nombre preferido» de la ficha puede estar en
+        # cualquier idioma (iNaturalist cae al neerlandés, al inglés…): no se usa.
+        inat = {"pref": None, "es": [], "en": [u["name_en"]] if u.get("name_en") else []}
+        legacy = None
+    return nm.pick_name(
+        u["name"],
+        inat.get("pref"),
+        inat.get("es") or [],
+        inat.get("en") or [],
+        (wd or {}).get("common_es") or [],
+        (wd or {}).get("label_es"),
+        gbif_spa or [],
+        legacy,
+        nm.wiki_lead_names(wiki["extract"], u["name"]) if wiki and wiki.get("lang") == "es" else [],
+    )
 
 
-def _images(u: dict, taxon: dict | None, wd: dict | None, commons: dict[str, dict]) -> list[dict]:
+def commons_key(name: str) -> str:
+    """
+    Clave de un fichero de Commons. Wikidata lo da codificado (`%28MHNT%29%20Apis…`)
+    y la etapa commons lo guarda con guiones bajos y sin codificar: sin unificarlos,
+    el cruce solo acertaba con los nombres sin espacios ni signos (5 800 imágenes de
+    las ~85 000 que Wikidata señala).
+    """
+    from urllib.parse import unquote
+
+    n = unquote(name).replace(" ", "_")
+    return n[:1].upper() + n[1:]
+
+
+def _images(
+    u: dict,
+    taxon: dict | None,
+    wd: dict | None,
+    commons: dict[str, dict],
+    extra: list[dict] | None = None,
+    wiki_img: dict | None = None,
+) -> list[dict]:
     """
     Imágenes con licencia libre y autor conocido.
 
@@ -422,12 +436,14 @@ def _images(u: dict, taxon: dict | None, wd: dict | None, commons: dict[str, dic
     """
     out: list[dict] = []
     for fname in (wd or {}).get("images", [])[:3]:
-        meta = commons.get(fname)
+        meta = commons.get(commons_key(fname))
         if not meta or (meta.get("license") or "").lower() not in FREE_LICENSES:
             continue
         out.append(
             {
-                "url": meta["thumb"],
+                # Sin parámetros utm y con el host canónico: ahorra ~100 bytes por imagen
+                # y el prefijo `c:` (urls.ts) lo reconstruye.
+                "url": meta["thumb"].split("?")[0].replace("https://thumb.wikimedia.org/wikipedia/commons/", "https://upload.wikimedia.org/wikipedia/commons/"),
                 "ratio": meta.get("ratio"),
                 "author": meta.get("author"),
                 "license": meta.get("license_label") or meta.get("license"),
@@ -435,7 +451,21 @@ def _images(u: dict, taxon: dict | None, wd: dict | None, commons: dict[str, dic
                 "page": meta.get("page"),
             }
         )
-    photos = (taxon or {}).get("photos") or ([u["inat_photo"]] if u.get("inat_photo") else [])
+    if wiki_img and (wiki_img["meta"].get("license") or "").lower() in FREE_LICENSES and not out:
+        m = wiki_img["meta"]
+        out.append(
+            {
+                "url": m["thumb"].split("?")[0].replace("https://thumb.wikimedia.org/wikipedia/commons/", "https://upload.wikimedia.org/wikipedia/commons/"),
+                "ratio": m.get("ratio"),
+                "author": m.get("author"),
+                "license": m.get("license_label") or m.get("license"),
+                "source": "commons",
+                "page": m.get("page"),
+            }
+        )
+    photos = list((taxon or {}).get("photos") or ([u["inat_photo"]] if u.get("inat_photo") else []))
+    # Otras fotos libres del taxón (etapa photos), tras las que ya traía la ficha.
+    photos += [p for p in (extra or []) if p.get("id") not in {q.get("id") for q in photos}]
     for p in photos:
         if len(out) >= 6:
             break
@@ -470,6 +500,21 @@ def run() -> None:
     worms = {w["inat_id"]: w for w in _read("worms.jsonl")}
     domestic = {d["inat_id"]: d for d in _read("domestic.jsonl")}
     breeds = _read("breeds.jsonl")
+    # Capas de nombres y fotos (etapas inat_names, gbif_names, photos, rank_names).
+    inat_names = {n["inat_id"]: n for n in _read("names_inat.jsonl")}
+    gbif_names = {n["inat_id"]: n["spa"] for n in _read("names_gbif.jsonl")}
+    extra_photos = {p["inat_id"]: p["photos"] for p in _read("photos_inat.jsonl")}
+    for g in _read("gbif_media.jsonl"):
+        if g.get("photo"):
+            extra_photos.setdefault(g["inat_id"], []).append(g["photo"])
+    wiki_images = {p["inat_id"]: p for p in _read("wiki_images.jsonl")}
+    sizes = {p["inat_id"]: p for p in _read("size.jsonl")}
+    nm.learn_vocabulary([x for n in inat_names.values() for x in n.get("es", [])] + [x for v in gbif_names.values() for x in v])
+    rank_es = _rank_names(inat_names, _read("names_ranks.jsonl"))
+    print(
+        f"[build] nombres de iNaturalist: {len(inat_names)} · GBIF: {len(gbif_names)} · fotos extra: {len(extra_photos)} · imágenes de Wikipedia: {len(wiki_images)} · fotos de GBIF incluidas en las extra · rangos con nombre: {len(rank_es)}",
+        flush=True,
+    )
     urban_by_gbif = {u["gbif_key"]: u["cities"] for u in _read("urban.jsonl")}
     deep_keys = {d["gbif_key"] for d in _read("depth.jsonl") if d.get("deep_only")}
     cities_path = config.OUT / "cities.json"
@@ -540,9 +585,9 @@ def run() -> None:
             excluded["microscópica o parásito interno, casi sin fotos de personas"] += 1
             continue
         grp = group_of(anc_names)
-        name_es, name_src, aliases = _verify_name_es(u, t, w)
+        name_es, name_src, aliases = _verify_name_es(u, t, w, inat_names.get(inat_id), gbif_names.get(inat_id), wiki_es.get(inat_id))
         iucn, iucn_src, iucn_note = _verify_iucn(t, w)
-        imgs = _images(u, t, w, commons)
+        imgs = _images(u, t, w, commons, extra_photos.get(inat_id), wiki_images.get(inat_id))
         gkey = str((g or {}).get("gbif_key") or "")
         urban = urban_by_gbif.get(gkey) if gkey not in shared_keys else None
         facts = _facts(traits.get(inat_id), worms.get(inat_id), domestic.get(inat_id), urban)
@@ -590,7 +635,8 @@ def run() -> None:
         key = (rank, a["name"])
         if key not in taxa_ids:
             taxa_ids[key] = len(taxa_ids) + 1
-            db.execute("INSERT INTO taxon VALUES (?,?,?,?)", (taxa_ids[key], rank, a["name"], a.get("name_es")))
+            es = rank_es.get(a["id"]) if a.get("id") else None
+            db.execute("INSERT INTO taxon (id, rank, sci, es) VALUES (?,?,?,?)", (taxa_ids[key], rank, a["name"], es))
         return taxa_ids[key]
 
     for r in rows:
@@ -601,7 +647,7 @@ def run() -> None:
         if name_en and _norm(name_en) == _norm(u["name"]):
             name_en = None
         db.execute(
-            """INSERT INTO species VALUES (?,?,?,?,?, ?,?,?, ?,?, ?,?,?,?,?,?, ?,?, ?,?,?,?,?, ?,?,?)""",
+            """INSERT INTO species VALUES (?,?,?,?,?, ?,?,?, ?,?, ?,?,?,?,?,?, ?,?, ?,?,?,?,?, ?,?,?, ?,?)""",
             (
                 u["inat_id"],
                 u["name"],
@@ -629,8 +675,16 @@ def run() -> None:
                 r["taxo"],
                 (g or {}).get("gbif_name") if (g or {}).get("match") == "synonym" else None,
                 seq_by_group[r["grp"]],
+                (sizes.get(u["inat_id"]) or {}).get("mass_g"),
+                (sizes.get(u["inat_id"]) or {}).get("length_mm"),
             ),
         )
+        sz = sizes.get(u["inat_id"]) or {}
+        if sz.get("mass_g"):
+            db.execute("INSERT INTO provenance VALUES (?,?,?,?)", (u["inat_id"], "mass_g", sz["mass_src"], None))
+        if sz.get("length_mm"):
+            kind = {"TL": "longitud total máxima", "SVL": "longitud hocico-cloaca máxima", "SCL": "longitud recta del caparazón máxima"}[sz["length_kind"]]
+            db.execute("INSERT INTO provenance VALUES (?,?,?,?)", (u["inat_id"], "length_mm", sz["length_src"], f"{sz['length_kind']}: {kind}"))
         summary = wiki_es.get(u["inat_id"])
         db.execute(
             "INSERT INTO detail VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -692,11 +746,13 @@ def run() -> None:
 
     for position, (code, label) in enumerate(GROUP_LABEL.items()):
         total = db.execute("SELECT COUNT(*) FROM species WHERE grp = ?", (code,)).fetchone()[0]
-        db.execute("INSERT INTO grp VALUES (?,?,?,?)", (code, label, position, total))
+        db.execute("INSERT INTO grp (code, label, position, total) VALUES (?,?,?,?)", (code, label, position, total))
+    _representatives(db)
 
     db.execute("INSERT INTO species_fts(species_fts) VALUES ('optimize')")
     total = db.execute("SELECT COUNT(*) FROM species").fetchone()[0]
     db.execute("INSERT INTO meta VALUES ('built_at', ?)", (built_at,))
+    db.execute("INSERT INTO meta VALUES ('schema', ?)", (str(CATALOG_SCHEMA),))
     db.execute("INSERT INTO meta VALUES ('species', ?)", (str(total),))
     db.execute("INSERT INTO meta VALUES ('min_rg_observations', ?)", (str(config.MIN_RG_OBSERVATIONS),))
     db.execute("INSERT INTO meta VALUES ('excluded', ?)", (json.dumps(excluded, ensure_ascii=False),))
@@ -713,6 +769,8 @@ def run() -> None:
         "repro": q("SELECT COUNT(*) FROM species WHERE repro IS NOT NULL"),
         "domestic": q("SELECT COUNT(*) FROM species WHERE domestic >= 1"),
         "envs": q("SELECT COUNT(*) FROM species WHERE envs != 0"),
+        "mass": q("SELECT COUNT(*) FROM species WHERE mass_g IS NOT NULL"),
+        "length": q("SELECT COUNT(*) FROM species WHERE length_mm IS NOT NULL"),
         "envBits": env_bits,
         "diets": [r[0] for r in db.execute("SELECT DISTINCT diet FROM species WHERE diet IS NOT NULL")],
         "repros": [r[0] for r in db.execute("SELECT DISTINCT repro FROM species WHERE repro IS NOT NULL")],
@@ -722,9 +780,63 @@ def run() -> None:
     db.execute("VACUUM")
     db.close()
 
-    version = hashlib.sha256(db_path.read_bytes()).hexdigest()[:12]
-    _publish(db_path, version, total)
+    raw = db_path.read_bytes()
+    version = hashlib.sha256(raw).hexdigest()[:12]
+    # Ficha del catálogo para la etapa `cloud` (manifiesto de Cloud Storage).
+    (config.OUT / "catalogo.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "schema": CATALOG_SCHEMA,
+                "built_at": built_at,
+                "species": total,
+                "breeds": n_breeds,
+                "size": len(raw),
+                "md5": hashlib.md5(raw).hexdigest(),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    del raw
+    if os.environ.get("ZARPA_NO_PUBLISH"):
+        print("[build] ZARPA_NO_PUBLISH: no se copia a app/")
+    else:
+        _publish(db_path, version, total, built_at)
     print(f"[build] {total} especies · {n_breeds} razas · excluidas {dict(excluded)} · versión {version}")
+
+
+def _rank_names(inat_names: dict[int, dict], wiki: list[dict]) -> dict[int, str]:
+    """Nombre español de cada nodo (clase, orden, familia): iNaturalist y luego Wikidata."""
+    wd = {w["inat_id"]: w for w in wiki}
+    out: dict[int, str] = {}
+    for node_id in set(wd) | {i for i, n in inat_names.items() if n.get("rank") in ("class", "order", "family")}:
+        n = inat_names.get(node_id) or {}
+        w = wd.get(node_id) or {}
+        sci = n.get("name") or ""
+        name, _, _ = nm.pick_name(sci, n.get("pref"), n.get("es") or [], n.get("en") or [], w.get("common_es") or [], w.get("label_es"), [])
+        if name:
+            out[node_id] = name
+    return out
+
+
+def _representatives(db: sqlite3.Connection) -> None:
+    """Para cada clase/orden/familia y grupo, la especie más observada con foto."""
+    for col, table, key in (("class_id", "taxon", "id"), ("order_id", "taxon", "id"), ("family_id", "taxon", "id")):
+        db.execute(
+            f"""UPDATE taxon SET rep_id = r.id, img = r.img, img_ratio = r.img_ratio FROM (
+                  SELECT {col} AS tid, id, img, img_ratio, ROW_NUMBER() OVER (PARTITION BY {col} ORDER BY rg_obs DESC) AS n
+                  FROM species WHERE img IS NOT NULL AND {col} IS NOT NULL
+                ) r WHERE r.n = 1 AND taxon.id = r.tid"""
+        )
+    db.execute(
+        """UPDATE grp SET rep_id = r.id, img = r.img, img_ratio = r.img_ratio FROM (
+             SELECT grp AS g, id, img, img_ratio, ROW_NUMBER() OVER (PARTITION BY grp ORDER BY rg_obs DESC) AS n
+             FROM species WHERE img IS NOT NULL
+           ) r WHERE r.n = 1 AND grp.code = r.g"""
+    )
 
 
 def _facts(tr: dict | None, wm: dict | None, dom: dict | None, urban: list | None = None) -> dict:
@@ -827,6 +939,44 @@ def _breed_id(b: dict, name: str) -> str:
     return f"{b['authority']}:{b['species']}:{code}"
 
 
+_BREED_LOWER = {"de", "del", "la", "las", "los", "el", "y", "e", "o", "da", "do", "dos", "das", "du", "des", "von", "van", "di", "al", "en", "a"}
+
+
+def _title_breed(name: str) -> str:
+    """«SETTER IRLANDÉS ROJO Y BLANCO» → «Setter Irlandés Rojo y Blanco» (la FCI y el MAPA escriben en mayúsculas)."""
+
+    def word(w: str, first: bool) -> str:
+        if not first and w.lower() in _BREED_LOWER:
+            return w.lower()
+        out = []
+        for part in w.split("-"):
+            if "'" in part and part.index("'") <= 1:
+                head, tail = part.split("'", 1)
+                out.append(head.lower() + "'" + tail[:1].upper() + tail[1:].lower())
+            else:
+                out.append(part[:1].upper() + part[1:].lower())
+        return "-".join(out)
+
+    return " ".join(word(w, i == 0) for i, w in enumerate(name.split()))
+
+
+def _breed_display_name(b: dict) -> str | None:
+    """
+    Nombre que se muestra de la raza. Los nombres de raza son nombres propios y no
+    se traducen: se usa el español de la autoridad (FCI, MAPA, terminología FAO) y,
+    si no lo hay, el nombre oficial tal cual. Dos arreglos: el MAPA a veces trae como
+    «nombre» el pie de la foto (se descarta y se usa el nombre oficial), y los
+    nombres que la autoridad escribe TODO EN MAYÚSCULAS pasan a mayúscula inicial.
+    """
+    name = b.get("name_es") or b.get("name_official")
+    official = b.get("name_official")
+    if name and official and (len(name) > 60 or re.search(r"\d|Autor:|Imagen|©", name)):
+        name = official
+    if name and name.upper() == name and any(c.isalpha() for c in name):
+        name = _title_breed(name)
+    return name
+
+
 def _insert_breeds(db: sqlite3.Connection, breeds: list[dict], included: set[int]) -> int:
     """Razas de las especies que están en el catálogo, en orden de autoridad y nombre."""
     order = {"fci": 0, "fife": 1, "mapa": 2, "fao": 3}
@@ -840,10 +990,11 @@ def _insert_breeds(db: sqlite3.Connection, breeds: list[dict], included: set[int
     rids: dict[int, str] = {}
     n = 0
     for b in sorted((b for b in breeds if b["species"] in included), key=key):
-        name = b.get("name_es") or b.get("name_official")
-        if not name or _breed_id(b, name) in seen:
+        id_name = b.get("name_es") or b.get("name_official")  # el id usa el nombre original: el índice de razas de la IA lo necesita estable
+        name = _breed_display_name(b)
+        if not name or _breed_id(b, id_name) in seen:
             continue
-        seen.add(_breed_id(b, name))
+        seen.add(_breed_id(b, id_name))
         seq[b["species"]] += 1
         mapa = b.get("mapa") or {}
         other = [x for x in [b.get("name_official"), b.get("name_en"), *(b.get("other_names") or [])] if x and _norm(x) != _norm(name)]
@@ -857,7 +1008,7 @@ def _insert_breeds(db: sqlite3.Connection, breeds: list[dict], included: set[int
         if b["authority"] == "fife":
             status = "Reconocimiento completo" if b.get("status") == "completo" else "Reconocimiento preliminar"
         grp = b.get("group_name") and f"{b['group']} · {b['group_name']}" or b.get("geo")
-        bid = _breed_id(b, name)
+        bid = _breed_id(b, id_name)
         rid = _breed_rid(bid)
         if rid in rids:
             raise SystemExit(f"Colisión de rid entre {bid} y {rids[rid]}: cambiar _breed_rid")
@@ -923,7 +1074,7 @@ def _wiki_title(url: str | None) -> str | None:
     return unquote(url.rsplit("/wiki/", 1)[-1])
 
 
-def _publish(db_path: Path, version: str, total: int) -> None:
+def _publish(db_path: Path, version: str, total: int, built_at: str) -> None:
     assets = APP / "assets" / "db"
     assets.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(db_path, assets / "catalogo.db")
@@ -931,6 +1082,8 @@ def _publish(db_path: Path, version: str, total: int) -> None:
         "// Generado por tools/zarpa_data/stages/build.py. No editar a mano.\n"
         f"export const CATALOG_VERSION = '{version}';\n"
         f"export const CATALOG_SPECIES = {total};\n"
+        f"export const CATALOG_SCHEMA = {CATALOG_SCHEMA};\n"
+        f"export const CATALOG_BUILT_AT = '{built_at}';\n"
         "export const CATALOG_ASSET: number = require('../../assets/db/catalogo.db');\n",
         encoding="utf-8",
         newline="\n",  # en Windows, sin esto sale con CRLF y git lo ve todo cambiado
