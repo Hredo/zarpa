@@ -11,6 +11,7 @@ import { FichaHero, HERO_OVERLAP, PhotoCredit } from '@/components/ficha/FichaHe
 import { CountryList } from '@/components/ficha/CountryList';
 import { IucnScale } from '@/components/ficha/IucnScale';
 import { LifeStyle } from '@/components/ficha/LifeStyle';
+import { PlatesSection, usePlates } from '@/components/ficha/PlatesSection';
 import { ReadMore } from '@/components/ficha/ReadMore';
 import { HourBars, MonthBars, peakMonths } from '@/components/ficha/SeasonChart';
 import { ShareCromoButton } from '@/components/ficha/ShareCromoButton';
@@ -134,12 +135,14 @@ export default function Ficha() {
     getSize(speciesId).then(setSize).catch(() => setSize(null));
   }, [speciesId, touchRecent]);
 
-  // Cantos y sonidos (iNaturalist, CC): solo para grupos que suenan; sin sonido no hay sección.
+  // Cantos y sonidos (Commons e iNaturalist, licencias libres): solo para grupos
+  // que suenan o si Wikidata enlaza una grabación; sin sonido no hay sección.
   const grp = sp?.grp;
+  const qid = sp?.wd ?? null;
   useEffect(() => {
-    if (!grp || !SOUND_GROUPS.has(grp)) return;
+    if (!grp || (!SOUND_GROUPS.has(grp) && !qid)) return;
     let alive = true;
-    speciesSounds(speciesId)
+    speciesSounds(SOUND_GROUPS.has(grp) ? speciesId : 0, qid)
       .then((r) => {
         if (alive) setSounds(r?.data ?? []);
       })
@@ -147,7 +150,7 @@ export default function Ficha() {
     return () => {
       alive = false;
     };
-  }, [speciesId, grp]);
+  }, [speciesId, grp, qid]);
 
   // Avance de razas: primero las del país del usuario, si las hay.
   useEffect(() => {
@@ -181,6 +184,10 @@ export default function Ficha() {
   useEffect(() => {
     sightingsOf(speciesId).then(setMine);
   }, [speciesId, caughtCount]);
+
+  // Huellas y láminas anatómicas de Commons (se piden cuando ya se sabe su ficha de Wikidata).
+  const plates = usePlates(sp ? sp.sci : null, sp?.complete ? sp.wd : null);
+  const hasPlates = !!plates && (plates.tracks.length > 0 || plates.drawings.length > 0);
 
   useEffect(() => {
     seasonality(speciesId, near ?? undefined).then(setSeason);
@@ -516,6 +523,14 @@ export default function Ficha() {
               </Section>
             </Appear>
           )}
+
+          {hasPlates && plates ? (
+            <Appear index={ix()}>
+              <Section title="Huellas y láminas" icon="rastro" accent={g.ink} tint={g.tint}>
+                <PlatesSection plates={plates} group={g} />
+              </Section>
+            </Appear>
+          ) : null}
 
           {sizeShown && (
             <Appear index={ix()}>

@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, TextInput, useWindowDimensio
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/Card';
+import { PlateColumn, usePlates } from '@/components/ficha/PlatesSection';
 import { GroupPill } from '@/components/GroupPill';
 import { Icon } from '@/components/Icon';
 import { IucnBadge } from '@/components/IucnBadge';
@@ -344,6 +345,8 @@ function Table({ a, b }: { a: Loaded; b: Loaded }) {
         </Txt>
       ) : null}
 
+      <PlatesCompare a={a} b={b} />
+
       <Section title="Países" icon="globe" accent={palette.sky} tint={palette.skyTint}>
         <Txt variant="small" tone="soft" style={styles.note}>
           Países con al menos {COUNTRY_MIN_OBS} observaciones registradas en GBIF.
@@ -366,6 +369,52 @@ function Table({ a, b }: { a: Loaded; b: Loaded }) {
         </Card>
       </Section>
     </View>
+  );
+}
+
+/**
+ * Huellas y láminas de las dos especies, lado a lado: lo que más ayuda a
+ * distinguirlas en el campo (la huella) y en detalle (cráneo, esqueleto,
+ * láminas). De Wikimedia Commons; cada imagen se abre a pantalla completa.
+ */
+function PlatesCompare({ a, b }: { a: Loaded; b: Loaded }) {
+  const palette = usePalette();
+  const { width } = useWindowDimensions();
+  const pa = usePlates(a.sp.sci, a.sp.wd);
+  const pb = usePlates(b.sp.sci, b.sp.wd);
+  const colW = Math.floor((width - space.lg * 2 - space.md) / 2);
+  const ga = groupColor(a.sp.grp);
+  const gb = groupColor(b.sp.grp);
+  const loading = pa === undefined || pb === undefined;
+  const offline = pa === null || pb === null;
+  return (
+    <Section title="Huellas y láminas" icon="rastro" accent={palette.brandInk} tint={palette.brandTint}>
+      {loading ? (
+        <ActivityIndicator color={palette.brand} accessibilityLabel="Cargando huellas y láminas" />
+      ) : (
+        <>
+          <Txt variant="subheading" style={styles.note}>
+            Huellas
+          </Txt>
+          <View style={styles.cols}>
+            <PlateColumn items={pa?.tracks ?? []} width={colW} tint={ga.tint} title={`Huellas de ${displayName(a.sp).name}`} empty={pa === null ? 'Sin conexión' : 'Sin huellas en Commons'} />
+            <PlateColumn items={pb?.tracks ?? []} width={colW} tint={gb.tint} title={`Huellas de ${displayName(b.sp).name}`} empty={pb === null ? 'Sin conexión' : 'Sin huellas en Commons'} />
+          </View>
+          <Txt variant="subheading" style={styles.note}>
+            Láminas y anatomía
+          </Txt>
+          <View style={styles.cols}>
+            <PlateColumn items={pa?.drawings ?? []} width={colW} tint={ga.tint} title={`Láminas de ${displayName(a.sp).name}`} empty={pa === null ? 'Sin conexión' : 'Sin láminas en Commons'} />
+            <PlateColumn items={pb?.drawings ?? []} width={colW} tint={gb.tint} title={`Láminas de ${displayName(b.sp).name}`} empty={pb === null ? 'Sin conexión' : 'Sin láminas en Commons'} />
+          </View>
+          <Txt variant="small" tone="faint" style={styles.note}>
+            {offline
+              ? 'Sin conexión: se verán cuando vuelva la red.'
+              : 'De Wikimedia Commons, clasificadas por su comunidad. Toca una para verla en grande con su autor y licencia.'}
+          </Txt>
+        </>
+      )}
+    </Section>
   );
 }
 

@@ -1,0 +1,155 @@
+import {
+  anatomyDetailCategories,
+  classifyCategories,
+  looksLikeDrawing,
+  mergeMedia,
+  parseAudioPages,
+  parseImagePages,
+  stripHtml,
+  type CommonsMedia,
+} from '@/lib/commons';
+import { commonsToSounds, mergeSounds, parseSounds, type RawObservation } from '@/lib/sounds';
+import { withUserAgent } from '@/lib/urls';
+
+describe('categorías de Commons', () => {
+  it('separa huellas, anatomía y láminas, y deja fuera el arte', () => {
+    const cats = classifyCategories([
+      'Category:Vulpes vulpes anatomy',
+      'Category:Vulpes vulpes in art',
+      'Category:Vulpes vulpes tracks',
+      'Category:Sus scrofa (illustrations)',
+      'Category:Roe deer tracks',
+      'Category:Vulpes vulpes feces',
+      'Category:Boars on stamps',
+      'Category:Vulpes vulpes skulls',
+    ]);
+    expect(cats.tracks).toEqual(['Category:Vulpes vulpes tracks', 'Category:Roe deer tracks']);
+    expect(cats.anatomy).toEqual(['Category:Vulpes vulpes anatomy', 'Category:Vulpes vulpes skulls']);
+    expect(cats.drawings).toEqual(['Category:Sus scrofa (illustrations)']);
+  });
+
+  it('de la anatomía solo baja a esqueleto, cráneo, huesos y dientes', () => {
+    expect(
+      anatomyDetailCategories(['Category:Red fox tails', 'Category:Vulpes vulpes bones', 'Category:Vulpes vulpes heads', 'Category:Vulpes vulpes teeth']),
+    ).toEqual(['Category:Vulpes vulpes bones', 'Category:Vulpes vulpes teeth']);
+  });
+
+  it('reconoce láminas por formato o por título', () => {
+    expect(looksLikeDrawing('File:Redfoxpaws.png', 'image/png')).toBe(true);
+    expect(looksLikeDrawing('File:Meyers b6 s0767 b1.jpg', 'image/jpeg')).toBe(true);
+    expect(looksLikeDrawing('File:Trittsiegel Fuchs 1.jpg', 'image/jpeg')).toBe(true);
+    expect(looksLikeDrawing('File:29-05-2021 Wandlitz toter Rotfuchs 08.jpg', 'image/jpeg')).toBe(false);
+  });
+});
+
+describe('archivos de Commons', () => {
+  const page = (title: string, mime: string, extra: Record<string, unknown> = {}) => ({
+    pageid: title.length,
+    title,
+    imageinfo: [
+      {
+        url: `https://upload.wikimedia.org/wikipedia/commons/a/ab/${title.slice(5)}?utm_source=x`,
+        thumburl: `https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/${title.slice(5)}/960px-${title.slice(5)}?utm_source=x`,
+        width: 1000,
+        height: 500,
+        mime,
+        descriptionurl: `https://commons.wikimedia.org/wiki/${title}`,
+        extmetadata: {
+          Artist: { value: '<a href="//commons.wikimedia.org/wiki/User:Erfil">Erfil</a>' },
+          LicenseShortName: { value: 'CC BY-SA 3.0' },
+          LicenseUrl: { value: 'https://creativecommons.org/licenses/by-sa/3.0' },
+          ...extra,
+        },
+      },
+    ],
+  });
+
+  it('lee autoría, licencia y miniaturas sin parámetros de seguimiento', () => {
+    const [m] = parseImagePages([page('File:Caminozorro.JPG', 'image/jpeg')]);
+    expect(m.author).toBe('Erfil');
+    expect(m.license).toBe('CC BY-SA 3.0');
+    expect(m.url).toBe('https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Caminozorro.JPG/960px-Caminozorro.JPG');
+    expect(m.thumb).toContain('/330px-Caminozorro.JPG');
+    expect(m.ratio).toBe(0.5);
+    expect(m.drawing).toBe(false);
+  });
+
+  it('descarta lo no libre, lo que no es imagen y, si se pide, las fotos', () => {
+    const pages = [
+      page('File:Foto.jpg', 'image/jpeg'),
+      page('File:Esquema.svg', 'image/svg+xml'),
+      page('File:Spuren.pdf', 'application/pdf'),
+      page('File:Logo.png', 'image/png', { NonFree: { value: 'true' } }),
+    ];
+    expect(parseImagePages(pages).map((m) => m.title)).toEqual(['File:Foto.jpg', 'File:Esquema.svg']);
+    expect(parseImagePages(pages, { drawing: 'only' }).map((m) => m.title)).toEqual(['File:Esquema.svg']);
+  });
+
+  it('une sin repetir y pone los dibujos delante', () => {
+    const m = (title: string, drawing: boolean) => ({ title, drawing }) as CommonsMedia;
+    const merged = mergeMedia([[m('a', false), m('b', true)], [m('b', true), m('c', true)]], 3);
+    expect(merged.map((x) => x.title)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('texto plano de la autoría', () => {
+    expect(stripHtml('<span>Oona R&amp;äisänen</span> (<a href="x">Mysid</a>)')).toBe('Oona R&äisänen ( Mysid )');
+    expect(stripHtml('')).toBeNull();
+  });
+});
+
+describe('sonidos que corresponden a la especie', () => {
+  it('de Commons solo lo reproducible en el móvil (MP3 o su copia en MP3)', () => {
+    const list = parseAudioPages([
+      {
+        pageid: 1,
+        title: 'File:Turdus merula 2.ogg',
+        videoinfo: [
+          {
+            url: 'https://upload.wikimedia.org/wikipedia/commons/7/7c/Turdus_merula_2.ogg?utm_source=x',
+            mime: 'application/ogg',
+            descriptionurl: 'https://commons.wikimedia.org/wiki/File:Turdus_merula_2.ogg',
+            derivatives: [
+              { src: 'https://upload.wikimedia.org/wikipedia/commons/7/7c/Turdus_merula_2.ogg', type: 'audio/ogg; codecs="vorbis"' },
+              { src: 'https://upload.wikimedia.org/wikipedia/commons/transcoded/7/7c/Turdus_merula_2.ogg/Turdus_merula_2.ogg.mp3', type: 'audio/mpeg' },
+            ],
+            extmetadata: { LicenseShortName: { value: 'Public domain' }, Artist: { value: 'Oona' } },
+          },
+        ],
+      },
+      { pageid: 2, title: 'File:Sin mp3.flac', videoinfo: [{ url: 'https://x/y.flac', mime: 'audio/x-flac', extmetadata: { LicenseShortName: { value: 'CC0' } } }] },
+    ]);
+    expect(list).toHaveLength(1);
+    expect(list[0].url).toBe('https://upload.wikimedia.org/wikipedia/commons/transcoded/7/7c/Turdus_merula_2.ogg/Turdus_merula_2.ogg.mp3');
+    const [s] = commonsToSounds(list);
+    expect(s.source).toBe('commons');
+    expect(s.obsUrl).toBe('https://commons.wikimedia.org/wiki/File:Turdus_merula_2.ogg');
+  });
+
+  it('de cada observación de iNaturalist solo el primer sonido, y Commons delante', () => {
+    const obs: RawObservation = {
+      id: 9,
+      user: { login: 'ana' },
+      sounds: [
+        { id: 1, file_url: 'https://static.inaturalist.org/sounds/1.mp3', license_code: 'cc-by', attribution: '(c) ana, some rights reserved (CC BY)' },
+        { id: 2, file_url: 'https://static.inaturalist.org/sounds/2.mp3', license_code: 'cc-by', attribution: '(c) ana, some rights reserved (CC BY)' },
+      ],
+    };
+    const inat = parseSounds([obs]);
+    expect(inat.map((s) => s.id)).toEqual([1]);
+    const commons = commonsToSounds([{ id: 5, url: 'u', author: 'Ana', licenseLabel: 'CC0', licenseUrl: 'l', page: 'p' }]);
+    // Mismo autor en las dos fuentes: no se repite.
+    expect(mergeSounds(commons, inat).map((s) => s.source)).toEqual(['commons']);
+  });
+});
+
+describe('cabecera de la app en lo remoto', () => {
+  it('añade User-Agent a las URL remotas y deja lo local igual', () => {
+    expect(withUserAgent('https://upload.wikimedia.org/x.jpg')).toEqual({
+      uri: 'https://upload.wikimedia.org/x.jpg',
+      headers: expect.objectContaining({ 'User-Agent': expect.stringContaining('Zarpa') }),
+    });
+    expect(withUserAgent('file:///data/x.jpg')).toBe('file:///data/x.jpg');
+    expect(withUserAgent(null)).toBeNull();
+    expect(withUserAgent(12)).toBe(12);
+  });
+});
