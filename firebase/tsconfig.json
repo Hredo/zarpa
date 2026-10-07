@@ -7,7 +7,12 @@
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // Las pruebas importan app/src/social/flows.ts: su `firebase/*` se resuelve
+    // aquí (como el `dedupe` de vitest), sin depender de app/node_modules.
+    "paths": {
+      "firebase/*": ["./node_modules/firebase/*"]
+    }
   },
   "include": ["test", "vitest.config.mts"]
 }
