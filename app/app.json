@@ -17,8 +17,7 @@
         "NSCameraUsageDescription": "Zarpa usa la cámara para reconocer en directo al animal que tienes delante y convertir tu foto en su pegatina. Las fotos se quedan en tu móvil.",
         "NSLocationWhenInUseUsageDescription": "Zarpa usa tu ubicación para saber qué especies viven donde estás (mejora el reconocimiento) y para apuntar dónde viste cada animal.",
         "NSMicrophoneUsageDescription": "Zarpa usa el micrófono solo cuando pulsas «Grabar» para guardar una nota de voz en un avistamiento. Las grabaciones se quedan en tu móvil.",
-        "NSMotionUsageDescription": "Zarpa usa la inclinación del móvil para el brillo de los cromos raros.",
-        "CADisableMinimumFrameDurationOnPhone": true
+        "NSMotionUsageDescription": "Zarpa usa la inclinación del móvil para el brillo de los cromos raros."
       }
     },
     "android": {

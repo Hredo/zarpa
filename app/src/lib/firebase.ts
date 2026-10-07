@@ -3,9 +3,9 @@ import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 // getReactNativePersistence solo existe en la entrada de React Native del SDK.
 // @ts-expect-error: los tipos públicos de firebase/auth no la declaran.
 import { connectAuthEmulator, getReactNativePersistence, initializeAuth, getAuth, type Auth } from 'firebase/auth';
-import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, disableNetwork, enableNetwork, getFirestore, type Firestore } from 'firebase/firestore';
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 /*
  * Punto único de Firebase. Todo el código de la app importa de aquí: nadie
@@ -57,5 +57,27 @@ export function fb() {
     connectStorageEmulator(storage, EMU_HOST, 9199);
   }
   cached = { app, auth, db, storage };
+  if (first) pauseInBackground(db);
   return cached;
+}
+
+/**
+ * Las escuchas en tiempo real (perfil, amigos, álbum) mantienen una conexión
+ * abierta con Firestore. En segundo plano no las ve nadie y solo gastan
+ * batería y datos: se corta la red al salir de la app y se reanuda al volver
+ * (Firestore guarda las escrituras pendientes y las manda entonces).
+ */
+function pauseInBackground(db: Firestore): void {
+  let offline = false;
+  AppState.addEventListener('change', (state) => {
+    if (state === 'background' && !offline) {
+      offline = true;
+      disableNetwork(db).catch(() => {
+        offline = false;
+      });
+    } else if (state === 'active' && offline) {
+      offline = false;
+      enableNetwork(db).catch(() => {});
+    }
+  });
 }
