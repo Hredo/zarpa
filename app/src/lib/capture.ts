@@ -3,10 +3,11 @@ import type { cv } from 'react-native-executorch';
 import type { Image, RawPixelData } from 'react-native-nitro-image';
 import type { Photo } from 'react-native-vision-camera';
 
-import { getEmbedder, judge } from '@/ai/engine';
+import { embedPhoto, judge } from '@/ai/engine';
 import type { Verdict } from '@/ai/decision';
-import type { Box } from '@/ai/frames';
+import { squareInside, type Box } from '@/ai/frames';
 
+import { traceStep } from './captureTrace';
 import { makeSticker } from './cutout';
 
 type ImageBuffer = cv.ImageBuffer;
@@ -33,6 +34,10 @@ export type CaptureResult = {
 };
 
 const SIGHTINGS = () => new Directory(Paths.document, 'avistamientos');
+/** Lado máximo del recorte guardado (pegatina, cromo y revisión). */
+const CROP_MAX = 1280;
+/** Lado de la imagen que se pasa a la IA (el modelo la reescala a su entrada). */
+const AI_SIDE = 448;
 
 function toImageBuffer(raw: RawPixelData): ImageBuffer | null {
   const bytes = new Uint8Array(raw.buffer);
@@ -79,40 +84,53 @@ export async function processCapture(
   const dir = SIGHTINGS();
   if (!dir.exists) dir.create({ intermediates: true });
 
+  traceStep('imagen');
   const image: Image = await photo.toImageAsync();
   photo.dispose();
 
+  traceStep('guardar');
   const photoFile = new File(dir, `${id}.jpg`);
-  await image.saveToFileAsync(photoFile.uri.replace('file://', ''), 'jpg', 0.9);
+  // La calidad va de 0 a 100 (con 0,9 la foto salía casi sin calidad).
+  await image.saveToFileAsync(photoFile.uri.replace('file://', ''), 'jpg', 90);
 
-  // Cuadrado alrededor del animal con un margen, en píxeles de la foto.
+  // Cuadrado alrededor del animal con un margen, en píxeles enteros de la foto
+  // (redondeando por separado inicio y fin, el recorte se salía un píxel y Android lo rechazaba).
   const W = image.width;
   const H = image.height;
-  const cx = (box.x + box.w / 2) * W;
-  const cy = (box.y + box.h / 2) * H;
-  let side = Math.max(box.w * W, box.h * H) * 1.36;
-  side = Math.min(side, W, H);
-  const x0 = Math.min(Math.max(0, cx - side / 2), W - side);
-  const y0 = Math.min(Math.max(0, cy - side / 2), H - side);
-  const crop = await image.cropAsync(Math.round(x0), Math.round(y0), Math.round(x0 + side), Math.round(y0 + side));
-  const small = await crop.resizeAsync(448, 448);
+  const sq = squareInside(box, W, H);
+  traceStep('recorte');
+  // Android devuelve la MISMA imagen si el recorte es la foto entera o el
+  // tamaño no cambia: entonces no se suelta dos veces.
+  const fullCrop = sq.side === W && sq.side === H ? image : await image.cropAsync(sq.x, sq.y, sq.x + sq.side, sq.y + sq.side);
+  // La foto entera ya está en disco: se suelta su mapa de bits (12 MP, ~48 MB) sin esperar al recolector.
+  if (fullCrop !== image) image.dispose();
+  // El recorte se guarda a 1280 px como mucho: sobra para la pegatina y el cromo, y
+  // el recorte de pegatinas del sistema no tiene que cargar una imagen de 3000 px.
+  const crop = fullCrop.width > CROP_MAX ? await fullCrop.resizeAsync(CROP_MAX, CROP_MAX) : fullCrop;
+  if (crop !== fullCrop) fullCrop.dispose();
+  const small = crop.width === AI_SIDE && crop.height === AI_SIDE ? crop : await crop.resizeAsync(AI_SIDE, AI_SIDE);
 
   const cropFile = new File(dir, `${id}-recorte.jpg`);
-  await crop.saveToFileAsync(cropFile.uri.replace('file://', ''), 'jpg', 0.92);
+  await crop.saveToFileAsync(cropFile.uri.replace('file://', ''), 'jpg', 92);
+  if (small !== crop) crop.dispose();
 
+  traceStep('ia');
   let verdict: Verdict | null = null;
   let embedding: Float32Array | null = null;
-  const embedder = getEmbedder();
-  if (embedder) {
-    const buffer = toImageBuffer(await small.toRawPixelDataAsync());
-    if (buffer) {
-      embedding = await embedder.embed(buffer);
-      verdict = judge(embedding, candidates);
-    }
+  const buffer = toImageBuffer(await small.toRawPixelDataAsync());
+  small.dispose();
+  if (buffer) {
+    embedding = embedPhoto(buffer);
+    if (embedding) verdict = judge(embedding, candidates);
   }
 
+  traceStep('pegatina');
   const stickerFile = new File(dir, `${id}-pegatina.png`);
-  const sticker = await makeSticker(cropFile.uri, stickerFile.uri.replace('file://', ''), { x: 0.5, y: 0.5 });
+  // La pegatina es un extra: si el servicio de recorte del sistema tarda (la
+  // primera vez se descarga), el fichaje sigue con la foto recortada.
+  const sticker = await withTimeout(makeSticker(cropFile.uri, stickerFile.uri.replace('file://', ''), { x: 0.5, y: 0.5 }), 8000, 'pegatina').catch(
+    () => null,
+  );
 
   return {
     id,
@@ -121,8 +139,25 @@ export async function processCapture(
     stickerUri: sticker?.uri ?? null,
     verdict,
     embedding,
-    box: { x: x0 / W, y: y0 / H, w: side / W, h: side / H },
+    box: { x: sq.x / W, y: sq.y / H, w: sq.side / W, h: sq.side / H },
   };
+}
+
+/** Rechaza con `what` si la promesa no termina a tiempo (un paso colgado no bloquea el visor). */
+export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(what)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
 }
 
 /** Borra los ficheros de un disparo que el usuario descartó. */

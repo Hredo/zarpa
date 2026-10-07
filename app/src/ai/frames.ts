@@ -80,3 +80,16 @@ export function frameBoxToView(box: Box, frameW: number, frameH: number, viewW: 
   const offY = (viewH - frameH * scale) / 2;
   return { x: box.x * scale + offX, y: box.y * scale + offY, w: box.w * scale, h: box.h * scale };
 }
+
+/**
+ * Cuadrado alrededor del animal con un 36 % de margen, en píxeles enteros y
+ * siempre dentro de la foto. `box` va normalizada (0–1).
+ */
+export function squareInside(box: Box, W: number, H: number): { x: number; y: number; side: number } {
+  const side = Math.max(1, Math.floor(Math.min(Math.max(box.w * W, box.h * H) * 1.36, W, H)));
+  const cx = (box.x + box.w / 2) * W;
+  const cy = (box.y + box.h / 2) * H;
+  const x = Math.min(Math.max(0, Math.round(cx - side / 2)), W - side);
+  const y = Math.min(Math.max(0, Math.round(cy - side / 2)), H - side);
+  return { x, y, side };
+}

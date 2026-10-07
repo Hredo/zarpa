@@ -9,11 +9,13 @@ import {
   type ImageEmbedder,
   type ObjectDetector,
 } from 'react-native-executorch';
+import { createSynchronizable } from 'react-native-worklets';
 import { create } from 'zustand';
 
-import { catalog } from '@/db';
+import { catalog, catalogReady } from '@/db';
 import { ensureCountries } from '@/db/catalogDetail';
 import { COUNTRY_MIN_OBS } from '@/db/query';
+import { fileUri, fsPath } from '@/lib/urls';
 
 import { BREED_MODEL, SPECIES_MODEL, type ModelSource } from './config';
 import { decide, softmax, type Lineage, type Verdict } from './decision';
@@ -54,6 +56,30 @@ let lineages: Map<number, Lineage> | null = null;
 let breedIndex: SpeciesIndex | null = null;
 let started = false;
 
+/**
+ * Cerrojo del modelo de especies. ExecuTorch reserva UNA vez los tensores de
+ * entrada y salida del codificador y los reutiliza: si el visor en vivo (hilo
+ * de la cámara) y el fichaje (foto en alta) lo usan a la vez, escriben en la
+ * misma memoria nativa y la app se cierra. Todo uso del codificador pasa por
+ * este cerrojo (un mutex de C++ compartido entre hilos).
+ */
+export const modelLock = createSynchronizable(0);
+
+/**
+ * Vector de la foto del fichaje, con el cerrojo del modelo. Corre en el hilo
+ * de JS (espera, como mucho, a que termine el fotograma que se esté analizando).
+ */
+export function embedPhoto(input: Parameters<ImageEmbedder['embedWorklet']>[0]): Float32Array | null {
+  const e = embedder;
+  if (!e) return null;
+  modelLock.lock();
+  try {
+    return e.embedWorklet(input);
+  } finally {
+    modelLock.unlock();
+  }
+}
+
 /** El detector, si está listo (lo usa el hilo de la cámara). */
 export const getDetector = () => detector;
 /** El codificador de especies, si está listo. */
@@ -66,6 +92,15 @@ export async function startAI(): Promise<void> {
   // app no manda nada a terceros que el usuario no haya pedido.
   setTelemetryEnabled(false);
   await Promise.all([loadDetector(), loadSpecies()]);
+}
+
+/** Vuelve a intentar cargar lo que falló (sin red al bajar el detector, catálogo aún sin abrir…). */
+export async function retryAI(): Promise<void> {
+  const s = useAI.getState();
+  const jobs: Promise<void>[] = [];
+  if (s.detector === 'error') jobs.push(loadDetector());
+  if (s.species === 'error') jobs.push(loadSpecies());
+  await Promise.all(jobs);
 }
 
 async function loadDetector() {
@@ -87,26 +122,31 @@ async function loadSpecies() {
     useAI.setState({ species: 'missing' });
     return;
   }
-  useAI.setState({ species: 'loading' });
+  useAI.setState({ species: 'loading', error: null });
   try {
+    // El linaje de cada especie sale del catálogo: si el usuario abre el visor
+    // mientras aún se baja, se espera a que esté (antes la IA fallaba para siempre).
+    await waitForCatalog();
     const [encoderPath, indexPath] = await Promise.all([
       resolveSource(SPECIES_MODEL.encoder, (p) => useAI.setState({ speciesProgress: p * 0.8 })),
       resolveSource(SPECIES_MODEL.index, (p) => useAI.setState({ speciesProgress: 0.8 + p * 0.2 })),
     ]);
-    embedder = await createImageEmbedder({
-      modelPath: encoderPath,
+    embedder ??= await createImageEmbedder({
+      // ExecuTorch abre la ruta a secas: con `file:///…` (lo que da expo-asset)
+      // respondía «AccessFailed» y la IA de especies no cargaba nunca.
+      modelPath: fsPath(encoderPath),
       // La normalización de CLIP y la L2 van dentro del modelo exportado: la
       // biblioteca solo divide entre 255 (ver tools/zarpa_models/export_pte.py).
       modelOpts: { resizeMode: 'stretch', interpolation: 'linear', normalizeOpts: { alpha: 1 / 255, beta: 0 } },
     });
-    const buffer = await new File(indexPath).arrayBuffer();
+    const buffer = await new File(fileUri(indexPath)).arrayBuffer();
     index = parseIndex(buffer);
-    lineages = await loadLineages();
+    if (!lineages) lineages = await loadLineages();
     if (BREED_MODEL) {
       // Las razas son un extra: si su índice falla, las especies siguen.
       try {
         const breedPath = await resolveSource(BREED_MODEL.index, () => {});
-        breedIndex = parseIndex(await new File(breedPath).arrayBuffer());
+        breedIndex = parseIndex(await new File(fileUri(breedPath)).arrayBuffer());
       } catch {
         breedIndex = null;
       }
@@ -114,6 +154,14 @@ async function loadSpecies() {
     useAI.setState({ species: 'ready', speciesProgress: 1 });
   } catch (e) {
     useAI.setState({ species: 'error', error: describe(e) });
+  }
+}
+
+async function waitForCatalog(timeoutMs = 120_000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  while (!catalogReady()) {
+    if (Date.now() > until) throw new Error('el catálogo aún no está descargado');
+    await new Promise((r) => setTimeout(r, 500));
   }
 }
 

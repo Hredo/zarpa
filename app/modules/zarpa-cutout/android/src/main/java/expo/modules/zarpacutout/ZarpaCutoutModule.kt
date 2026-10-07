@@ -17,6 +17,8 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -35,10 +37,14 @@ import kotlin.math.sin
  * 3. Se le añade el borde blanco del troquel dibujando la silueta en blanco
  *    desplazada en círculo y el sujeto encima.
  *
- * Si algo falla se devuelve null y la app usa la foto recortada en cuadrado.
+ * Si algo falla (también si se queda sin memoria: se atrapa `Throwable`, no solo
+ * `Exception`, porque un error sin atrapar aquí cierra la app) se devuelve null
+ * y la app usa la foto recortada en cuadrado.
  */
 class ZarpaCutoutModule : Module() {
   private var segmenter: SubjectSegmenter? = null
+  // ML Kit avisa en el hilo principal: el borde y el PNG se hacen aquí para no congelar la pantalla.
+  private val worker: ExecutorService by lazy { Executors.newSingleThreadExecutor() }
 
   private fun client(): SubjectSegmenter {
     segmenter?.let { return it }
@@ -61,7 +67,7 @@ class ZarpaCutoutModule : Module() {
         client().process(InputImage.fromBitmap(tiny, 0))
           .addOnSuccessListener { promise.resolve(true) }
           .addOnFailureListener { promise.resolve(false) }
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
         promise.resolve(false)
       }
     }
@@ -74,7 +80,7 @@ class ZarpaCutoutModule : Module() {
         }
         val image = InputImage.fromFilePath(context, Uri.parse(inputUri))
         client().process(image)
-          .addOnSuccessListener { result ->
+          .addOnSuccessListener(worker) { result ->
             try {
               val subject = pick(result.subjects, focusX * image.width, focusY * image.height)
               val bitmap = subject?.bitmap
@@ -90,14 +96,23 @@ class ZarpaCutoutModule : Module() {
               promise.resolve(
                 mapOf("uri" to Uri.fromFile(file).toString(), "width" to sticker.width, "height" to sticker.height)
               )
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
               promise.resolve(null)
             }
           }
-          .addOnFailureListener { promise.resolve(null) }
-      } catch (e: Exception) {
+          .addOnFailureListener(worker) { promise.resolve(null) }
+      } catch (e: Throwable) {
         promise.resolve(null)
       }
+    }
+
+    OnDestroy {
+      try {
+        segmenter?.close()
+      } catch (e: Throwable) {
+        // Se está cerrando la app: nada que hacer.
+      }
+      worker.shutdown()
     }
   }
 
