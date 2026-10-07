@@ -171,17 +171,17 @@ Rellénalo con la configuración web de **tu** proyecto de Firebase (ver
 **2. Modelos de IA.** No van en git (160 MB). Descárgalos de la release a `app/assets/models/`:
 
 ```bash
-gh release download v0.1.0 --repo Hredo/zarpa --dir assets/models --pattern "bioclip_int8.pte" --pattern "species_index.bin"
+gh release download v0.1.1 --repo Hredo/zarpa --dir assets/models --pattern "bioclip_int8.pte" --pattern "species_index.bin"
 ```
 
 Sin la CLI de GitHub, descárgalos a mano desde la
-[release v0.1.0](https://github.com/Hredo/zarpa/releases/tag/v0.1.0) a esa misma carpeta.
+[release v0.1.1](https://github.com/Hredo/zarpa/releases/tag/v0.1.1) a esa misma carpeta.
 Deben coincidir con el `id` de `app/src/ai/modelAsset.ts`; si regeneras los modelos con
 `tools/`, ese fichero se actualiza solo.
 
 | Fichero | SHA-256 |
 |---|---|
-| `bioclip_int8.pte` | `0bb59260ae040915f7c69ca231c8904f4925dbe5c162f69644f6dc4a018780ce` |
+| `bioclip_int8.pte` | `e3676ef32d655bd98ccde85ffe325861e5538fade29b8b3a048df09256b7b562` |
 | `species_index.bin` | `894be623d4710eb2982ecf6a6c8280d54fb3ac7e249bb3ce027f7f5eaa7fa4fb` |
 
 **3. Arrancar en un móvil** (compilación de desarrollo: la app usa módulos nativos que Expo
@@ -260,7 +260,9 @@ La generación completa tarda horas (las APIs públicas tienen límites de ritmo
 varios GB de caché. Para el día a día no hace falta: la app descarga el catálogo publicado.
 
 Los modelos (`tools/zarpa_models/`) usan entornos aparte con PyTorch y ExecuTorch:
-`export_pte.py` exporta el codificador de imagen de BioCLIP a ExecuTorch (int8),
+`export_pte.py` exporta el codificador de imagen de BioCLIP a ExecuTorch (int8) y
+ejecuta el `.pte` con el runtime de ExecuTorch para compararlo con el modelo original
+(en Windows el Control de aplicaciones bloquea ese runtime: hazlo en Linux o WSL),
 `build_index.py` crea el índice de especies, `bench.py` y `evaluate.py` calibran los
 umbrales y `publish.py` lo copia a `app/assets/models/` y escribe `app/src/ai/modelAsset.ts`.
 
