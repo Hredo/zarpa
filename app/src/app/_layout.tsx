@@ -12,6 +12,7 @@ import { CatalogDownload, type BootState } from '@/components/CatalogDownload';
 import { WelcomeGate } from '@/components/WelcomeGate';
 import { CatalogOffline, openDatabases } from '@/db';
 import { keepJournalSpecies } from '@/db/catalogDetail';
+import { installCrashLog, reportLastCrash } from '@/lib/crashLog';
 // Define la tarea de rarezas al cargar: el sistema puede arrancar la app solo para ella.
 import { routeRarityNotifications } from '@/lib/rarityAlerts';
 import { checkCatalogUpdate } from '@/db/catalogUpdate';
@@ -21,6 +22,9 @@ import { startSocial } from '@/social';
 import { startSync } from '@/sync';
 import { usePalette } from '@/theme';
 import { fontAssets } from '@/theme/fonts';
+
+// Lo primero: si la app se cierra por un error, la próxima vez se cuenta cuál fue.
+installCrashLog();
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   // En web y en algunos arranques en caliente la splash ya no existe.
@@ -62,6 +66,11 @@ export default function RootLayout() {
   };
 
   const ready = (fontsLoaded || fontError) && dbReady;
+
+  // Con la app ya pintada: si la última vez se cerró por un error, se dice cuál.
+  useEffect(() => {
+    if (ready) reportLastCrash();
+  }, [ready]);
 
   // Tocar un aviso de rareza abre la ficha de la especie.
   useEffect(() => {
