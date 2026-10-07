@@ -4,6 +4,18 @@ Todos los cambios importantes de Zarpa. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones,
 [SemVer](https://semver.org/lang/es/).
 
+## [0.1.1] — 2026-10-07
+
+### Arreglado
+
+- La IA de especies fallaba en cada foto («execute: Method 'forward' failed»,
+  `Error::Internal`): el modelo exportado llevaba la normalización de CLIP como una
+  resta y una división delante de la convolución cuantizada, y XNNPACK no podía
+  propagar las formas. La normalización va ahora plegada en esa convolución (la misma
+  función) y el exportador ejecuta el `.pte` con ExecuTorch y lo compara con el modelo
+  original antes de darlo por bueno (coseno medio 0,998 sobre fotos reales).
+- El disparo ya no hace sonido de obturador (salvo donde la ley lo exige).
+
 ## [0.1.0] — 2026-10-07
 
 Primera versión pública (beta, Android).
@@ -42,4 +54,5 @@ Primera versión pública (beta, Android).
   User-Agent propio).
 - Sonidos de otro animal en algunas fichas: ahora solo grabaciones identificadas por el sonido.
 
+[0.1.1]: https://github.com/Hredo/zarpa/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Hredo/zarpa/releases/tag/v0.1.0

@@ -5,3 +5,7 @@ allowBuilds:
   esbuild: true
   '@parcel/watcher': false
   unrs-resolver: false
+  # Expresiones regulares nativas, opcionales para superstatic (firebase-tools):
+  # sin compilar se usa la alternativa en JS. Solo se instala con Node ≥ 22.22,
+  # así que en local puede no aparecer y en la CI sí.
+  re2: false

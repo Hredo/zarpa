@@ -173,17 +173,17 @@ Fill it in with the web configuration of **your** Firebase project (see
 `app/assets/models/`:
 
 ```bash
-gh release download v0.1.0 --repo Hredo/zarpa --dir assets/models --pattern "bioclip_int8.pte" --pattern "species_index.bin"
+gh release download v0.1.1 --repo Hredo/zarpa --dir assets/models --pattern "bioclip_int8.pte" --pattern "species_index.bin"
 ```
 
 Without the GitHub CLI, download them by hand from
-[release v0.1.0](https://github.com/Hredo/zarpa/releases/tag/v0.1.0) into that folder.
+[release v0.1.1](https://github.com/Hredo/zarpa/releases/tag/v0.1.1) into that folder.
 They must match the `id` in `app/src/ai/modelAsset.ts`; if you regenerate the models with
 `tools/`, that file is updated for you.
 
 | File | SHA-256 |
 |---|---|
-| `bioclip_int8.pte` | `0bb59260ae040915f7c69ca231c8904f4925dbe5c162f69644f6dc4a018780ce` |
+| `bioclip_int8.pte` | `e3676ef32d655bd98ccde85ffe325861e5538fade29b8b3a048df09256b7b562` |
 | `species_index.bin` | `894be623d4710eb2982ecf6a6c8280d54fb3ac7e249bb3ce027f7f5eaa7fa4fb` |
 
 **3. Run it on a phone** (a development build: the app uses native modules that Expo Go
@@ -262,7 +262,9 @@ A full run takes hours (public APIs are rate limited) and several GB of cache. Y
 need it day to day: the app downloads the published catalogue.
 
 The models (`tools/zarpa_models/`) use separate environments with PyTorch and ExecuTorch:
-`export_pte.py` exports BioCLIP's image encoder to ExecuTorch (int8), `build_index.py`
+`export_pte.py` exports BioCLIP's image encoder to ExecuTorch (int8) and runs the `.pte`
+with the ExecuTorch runtime to compare it with the original model (on Windows, App
+Control blocks that runtime: do it on Linux or WSL), `build_index.py`
 builds the species index, `bench.py` and `evaluate.py` calibrate the thresholds and
 `publish.py` copies everything to `app/assets/models/` and writes `app/src/ai/modelAsset.ts`.
 

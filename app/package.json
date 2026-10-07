@@ -1,7 +1,7 @@
 {
   "name": "zarpa",
   "main": "expo-router/entry",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "dependencies": {
     "@expo-google-fonts/atkinson-hyperlegible-mono": "0.4.1",
     "@expo-google-fonts/atkinson-hyperlegible-next": "0.4.1",
