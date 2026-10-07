@@ -363,7 +363,9 @@ export default function Avistar() {
       // La cámara sigue encendida hasta tener la foto: antes se apagaba al
       // pulsar y el disparo se abortaba sin decir nada.
       const photo = await withTimeout(
-        photoOutput.capturePhoto({ flashMode: hasFlash ? flash : 'off' }, {}),
+        // Sin sonido de obturador: espanta al animal y molesta con el móvil en sonido.
+        // (Android solo lo fuerza donde la ley lo exige, como Japón o Corea.)
+        photoOutput.capturePhoto({ flashMode: hasFlash ? flash : 'off', enableShutterSound: false }, {}),
         CAPTURE_TIMEOUT_MS,
         'la cámara no respondió',
       );
