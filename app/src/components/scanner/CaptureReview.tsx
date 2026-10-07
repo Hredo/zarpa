@@ -16,6 +16,7 @@ import { discardCapture } from '@/lib/capture';
 import { fmt1 } from '@/lib/format';
 import { countryOf, placeName, type Coords } from '@/lib/location';
 import { fetchWeather, weatherToFields, type Weather } from '@/lib/weather';
+import { withUserAgent } from '@/lib/urls';
 import { useJournal } from '@/store/journal';
 import { duration, ease, radius, space, type, usePalette } from '@/theme';
 
@@ -330,7 +331,7 @@ function Option({ species, p, selected, onPress }: { species: SpeciesRow; p: num
           borderColor: selected ? palette.brand : 'rgba(255,255,255,0.16)',
         },
       ]}>
-      <Image source={listThumb(species.img)} style={styles.optionImg} contentFit="cover" />
+      <Image source={withUserAgent(listThumb(species.img))} style={styles.optionImg} contentFit="cover" />
       <View style={styles.fill}>
         <Txt
           variant="bodyStrong"

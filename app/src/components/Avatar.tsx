@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { withUserAgent } from '@/lib/urls';
 import { usePalette } from '@/theme';
 
 import { Txt } from './Txt';
@@ -34,7 +35,7 @@ export function Avatar({ uri, name, size = 40 }: Props) {
   const letters = initials(name);
   const box = { width: size, height: size, borderRadius: size / 2 };
   if (uri) {
-    return <Image source={{ uri }} style={[box, { backgroundColor: palette.surfaceAlt }]} contentFit="cover" transition={180} accessibilityIgnoresInvertColors />;
+    return <Image source={withUserAgent({ uri })} style={[box, { backgroundColor: palette.surfaceAlt }]} contentFit="cover" transition={180} accessibilityIgnoresInvertColors />;
   }
   if (letters) {
     return (

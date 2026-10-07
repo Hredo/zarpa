@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import type { BreedRow } from '@/db/catalog';
 import { COUNTRY_NAME } from '@/lib/countries';
 import { AUTHORITY_LABEL } from '@/lib/groups';
-import { expandUrl } from '@/lib/urls';
+import { expandUrl, withUserAgent } from '@/lib/urls';
 import { radius, space, usePalette } from '@/theme';
 
 import { Icon } from './Icon';
@@ -54,7 +54,7 @@ export function BreedLine({
       style={[styles.row, { borderBottomColor: palette.line }]}>
       <View style={[styles.thumb, { backgroundColor: tint ?? palette.surfaceAlt }]}>
         {breed.img ? (
-          <Image source={expandUrl(breed.img)?.replace('/960px-', '/330px-')} style={styles.thumbImg} contentFit="cover" transition={150} />
+          <Image source={withUserAgent(expandUrl(breed.img)?.replace('/960px-', '/330px-'))} style={styles.thumbImg} contentFit="cover" transition={150} />
         ) : (
           <Txt variant="data" tone="faint">
             {AUTHORITY_LABEL[breed.authority].split(' ')[0]}

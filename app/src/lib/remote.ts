@@ -1,5 +1,7 @@
 import { journal } from '@/db';
 
+import { USER_AGENT } from './urls';
+
 /*
  * Consultas en vivo a las API públicas (iNaturalist, GBIF), con caché local.
  *
@@ -10,7 +12,7 @@ import { journal } from '@/db';
  * sección no se muestra (nunca se inventa un sustituto).
  */
 
-const UA = 'Zarpa/0.1 (app de fauna; +https://github.com/Hredo)';
+const UA = USER_AGENT;
 const DAY = 86_400_000;
 
 export type Fetched<T> = { data: T; fetchedAt: string; fromCache: boolean };

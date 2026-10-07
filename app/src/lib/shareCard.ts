@@ -17,6 +17,7 @@ import { PAD_D, TOES } from '@/components/Logo';
 import { fontAssets } from '@/theme/fonts';
 import { groupColors, iucnColors, light, type GroupColor } from '@/theme/tokens';
 
+import { NET_HEADERS } from './urls';
 import { CARD_H, CARD_IUCN_SCALE, CARD_W, coverSrc, containDst, ellipsize, fitFontSize, iucnIndex } from './cardMath';
 
 /*
@@ -67,7 +68,10 @@ async function loadTypeface(key: keyof typeof fontAssets): Promise<SkTypeface | 
 async function loadImage(uri: string | null): Promise<SkImage | null> {
   if (!uri) return null;
   try {
-    const data = await Skia.Data.fromURI(uri);
+    // Las fotos remotas se bajan con la cabecera de la app (Wikimedia rechaza la de Android).
+    const data = /^https?:/i.test(uri)
+      ? Skia.Data.fromBytes(new Uint8Array(await (await fetch(uri, { headers: NET_HEADERS })).arrayBuffer()))
+      : await Skia.Data.fromURI(uri);
     return Skia.Image.MakeImageFromEncoded(data);
   } catch {
     return null;

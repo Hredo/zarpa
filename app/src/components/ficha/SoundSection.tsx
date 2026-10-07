@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { fmtDate } from '@/lib/format';
+import { NET_HEADERS } from '@/lib/urls';
 import type { Sound } from '@/lib/sounds';
 import { radius, space, usePalette, type GroupColor } from '@/theme';
 
@@ -19,7 +20,8 @@ type Props = { sounds: Sound[]; group: GroupColor; big?: boolean };
 /** Un reproductor por grabación: se monta de nuevo al cambiar de sonido, así nunca suenan dos. */
 function Player({ sound, group, big }: { sound: Sound; group: GroupColor; big?: boolean }) {
   const palette = usePalette();
-  const player = useAudioPlayer(sound.url, { updateInterval: 150 });
+  // Con la cabecera de la app: Commons rechaza la que manda Android por defecto.
+  const player = useAudioPlayer({ uri: sound.url, headers: NET_HEADERS }, { updateInterval: 150 });
   const status = useAudioPlayerStatus(player);
   const size = big ? 88 : 72;
 
@@ -80,8 +82,8 @@ function clock(s: number): string {
 }
 
 /**
- * «Cómo suena»: reproductor de las grabaciones de iNaturalist con su autor,
- * licencia Creative Commons, lugar y enlace a la observación original.
+ * «Cómo suena»: reproductor de las grabaciones (Commons e iNaturalist) con su
+ * autor, licencia, lugar y enlace al original.
  */
 export function SoundSection({ sounds, group, big }: Props) {
   const palette = usePalette();
@@ -105,7 +107,7 @@ export function SoundSection({ sounds, group, big }: Props) {
       <Press
         onPress={() => WebBrowser.openBrowserAsync(sound.obsUrl)}
         accessibilityRole="link"
-        accessibilityLabel="Abrir la grabación original en iNaturalist"
+        accessibilityLabel={`Abrir la grabación original en ${sound.source === 'commons' ? 'Wikimedia Commons' : 'iNaturalist'}`}
         style={styles.credit}>
         <Icon name="external" size={16} color={palette.inkSoft} />
         <Txt variant="small" tone="soft" style={styles.creditText}>
@@ -121,7 +123,7 @@ export function SoundSection({ sounds, group, big }: Props) {
         style={styles.credit}>
         <Icon name="info" size={16} color={palette.inkSoft} />
         <Txt variant="small" tone="soft" style={styles.creditText}>
-          Licencia {sound.licenseLabel} · vía iNaturalist
+          Licencia {sound.licenseLabel} · vía {sound.source === 'commons' ? 'Wikimedia Commons' : 'iNaturalist'}
         </Txt>
       </Press>
     </View>

@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 
+import { NET_HEADERS } from './urls';
+
 export * from './offlineMath';
 
 /*
@@ -67,7 +69,7 @@ export async function prefetchPhotos(
       const i = next++;
       if (i >= total) return;
       try {
-        if (await Image.prefetch(urls[i], 'disk')) ok++;
+        if (await Image.prefetch(urls[i], { cachePolicy: 'disk', headers: NET_HEADERS })) ok++;
         else failed++;
       } catch {
         failed++;

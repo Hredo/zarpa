@@ -1,14 +1,25 @@
+import type { CommonsSound } from './commons';
 import { COUNTRY_NAME } from './countries';
 
 /*
- * Cantos y sonidos de iNaturalist: observaciones de grado investigación con
- * sonido propio y licencia Creative Commons. Se muestra siempre autor, licencia
- * y lugar, con enlace a la observación original. Sin sonido, la sección no sale.
+ * Cantos y sonidos, de dos fuentes en las que el sonido ES de la especie:
+ *
+ *   - Wikimedia Commons: las grabaciones de referencia que Wikidata enlaza a la
+ *     especie (propiedad P51), elegidas y revisadas por la comunidad.
+ *   - iNaturalist: observaciones de grado investigación que solo tienen sonido
+ *     (sin fotos). En esas, la comunidad identificó la especie escuchando la
+ *     grabación. En las que llevan foto y sonido, la identificación sale de la
+ *     foto y el sonido puede ser de otro animal (un pájaro de fondo junto a una
+ *     rana): por eso salían grabaciones que no correspondían.
+ *
+ * Se muestra siempre autor, licencia y lugar, con enlace al original. Sin
+ * sonido, la sección no sale.
  */
 
 export type Sound = {
-  /** Id del sonido en iNaturalist. */
+  /** Id del sonido en iNaturalist o de la página en Commons. */
   id: number;
+  source: 'inat' | 'commons';
   url: string;
   author: string;
   /** Código de licencia de iNaturalist («cc-by-nc»). */
@@ -18,6 +29,7 @@ export type Sound = {
   /** «España», «Massachusetts, US»… tal como la anotó quien grabó. */
   place: string | null;
   observedOn: string | null;
+  /** Observación de iNaturalist o página del archivo en Commons. */
   obsUrl: string;
 };
 
@@ -84,12 +96,16 @@ export function placeLabel(guess: string | null | undefined): string | null {
   return g;
 }
 
-/** Filtra y ordena: solo licencias libres sin NC, formatos reproducibles, un sonido por autor, ligeros primero. */
+/**
+ * Filtra y ordena: solo licencias libres sin NC, formatos reproducibles, un
+ * sonido por autor, ligeros primero. De cada observación, solo su primer
+ * sonido: es el que se usó para identificarla.
+ */
 export function parseSounds(results: RawObservation[], limit = 3): Sound[] {
   const seen = new Set<string>();
   const out: (Sound & { heavy: boolean })[] = [];
   for (const o of results) {
-    for (const s of o.sounds ?? []) {
+    for (const s of (o.sounds ?? []).slice(0, 1)) {
       const lic = s.license_code ? LICENSES[s.license_code] : undefined;
       if (!lic || !s.file_url || s.hidden) continue;
       const ext = extOf(s.file_url);
@@ -98,6 +114,7 @@ export function parseSounds(results: RawObservation[], limit = 3): Sound[] {
       if (!author) continue;
       out.push({
         id: s.id,
+        source: 'inat',
         url: s.file_url.replace(/^http:/, 'https:'),
         author,
         license: s.license_code as string,
@@ -114,6 +131,36 @@ export function parseSounds(results: RawObservation[], limit = 3): Sound[] {
   out.sort((a, b) => Number(a.heavy) - Number(b.heavy));
   const unique = out.filter((s) => (seen.has(s.author) ? false : (seen.add(s.author), true)));
   return unique.slice(0, limit).map(({ heavy: _heavy, ...s }) => s);
+}
+
+/** Grabaciones de Commons (ya filtradas en `commons.ts`) en el formato del reproductor. */
+export function commonsToSounds(list: readonly CommonsSound[]): Sound[] {
+  return list.map((c) => ({
+    id: c.id,
+    source: 'commons' as const,
+    url: c.url,
+    author: c.author,
+    license: c.licenseLabel.toLowerCase().replace(/\s+/g, '-'),
+    licenseLabel: c.licenseLabel,
+    licenseUrl: c.licenseUrl,
+    place: null,
+    observedOn: null,
+    obsUrl: c.page,
+  }));
+}
+
+/** Primero las de referencia de Commons, luego las de iNaturalist; sin repetir autor. */
+export function mergeSounds(commons: readonly Sound[], inat: readonly Sound[], limit = 4): Sound[] {
+  const seen = new Set<string>();
+  const out: Sound[] = [];
+  for (const s of [...commons, ...inat]) {
+    const who = s.author.toLowerCase();
+    if (seen.has(who)) continue;
+    seen.add(who);
+    out.push(s);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /**
