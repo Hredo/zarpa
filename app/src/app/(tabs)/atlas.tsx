@@ -138,7 +138,8 @@ export default function Atlas() {
     return {
       visible: mine,
       points: pts.map((p) => [p.lng, p.lat] as [number, number]),
-      cells: mine && center ? unexploredCells(center, pts) : [],
+      // Sin ningún avistamiento todo está «sin explorar»: la malla salía como un gran cuadrado.
+      cells: mine && center && pts.length > 0 ? unexploredCells(center, pts) : [],
     };
   }, [sightings, near, mine]);
 
@@ -297,20 +298,21 @@ export default function Atlas() {
       </View>
 
       {species.length === 0 && !preview && (
+        // Aviso en una sola línea: el mapa se queda a la vista.
         <Animated.View
           entering={FadeInDown.duration(duration.enter).easing(ease.out)}
-          style={[styles.emptyCard, elevation.raised, { backgroundColor: palette.surface, bottom: space.xl }]}>
-          <View style={[styles.emptyIcon, { backgroundColor: palette.skyTint }]}>
-            <Icon name="atlas" size={28} color={palette.sky} />
-          </View>
-          <Txt variant="heading">Tu Atlas aún está en blanco</Txt>
-          <Txt variant="body" tone="soft">
-            Guarda las especies que te interesen y aquí se pintan los sitios donde la gente las ha visto. En cada ficha,
-            «Dónde vive» te lo enseña sin guardar nada.
+          style={[styles.emptyPill, elevation.card, { backgroundColor: palette.surface, bottom: space.lg }]}>
+          <Icon name="atlas" size={20} color={palette.sky} />
+          <Txt variant="small" tone="soft" style={styles.fill} numberOfLines={2}>
+            Guarda especies y aquí verás dónde se han visto.
           </Txt>
-          <Press onPress={() => router.push('/bestiario')} style={[styles.primary, { backgroundColor: palette.brand }]}>
-            <Txt variant="bodyStrong" tone="onBrand">
-              Explorar el Bestiario
+          <Press
+            onPress={() => router.push('/bestiario')}
+            accessibilityRole="button"
+            accessibilityLabel="Explorar el Bestiario"
+            style={[styles.emptyBtn, { backgroundColor: palette.brand }]}>
+            <Txt variant="label" tone="onBrand">
+              Bestiario
             </Txt>
           </Press>
         </Animated.View>
@@ -452,9 +454,19 @@ const styles = StyleSheet.create({
   bannerIcon: { width: 44, height: 44, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   bannerBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   bannerBtn: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2, minHeight: 48, paddingHorizontal: space.lg, borderRadius: radius.pill },
-  emptyCard: { position: 'absolute', left: space.lg, right: space.lg, padding: space.lg, borderRadius: radius.xl, gap: space.sm },
-  emptyIcon: { width: 56, height: 56, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', marginBottom: space.xs },
-  primary: { marginTop: space.sm, alignSelf: 'flex-start', height: 48, paddingHorizontal: space.xl, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  emptyPill: {
+    position: 'absolute',
+    left: space.lg,
+    right: space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingLeft: space.md,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
+    borderRadius: radius.pill,
+  },
+  emptyBtn: { minHeight: 40, paddingHorizontal: space.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   legend: { position: 'absolute', left: space.md, bottom: space.md, paddingVertical: space.sm, paddingHorizontal: space.md, borderRadius: radius.lg, gap: space.xs },
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   ramp: { width: 44, height: 10, borderRadius: 5, overflow: 'hidden', flexDirection: 'row' },
