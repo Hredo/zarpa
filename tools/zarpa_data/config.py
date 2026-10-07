@@ -18,7 +18,7 @@ EXTERNAL = ROOT / "external"
 # Identificación ante las API públicas. Wikimedia, GBIF e iNaturalist piden un
 # User-Agent con un contacto; se usa la página pública del autor en GitHub y no
 # un correo personal.
-USER_AGENT = "ZarpaDataBot/0.1 (+https://github.com/Hredo; catalogo de fauna)"
+USER_AGENT = "ZarpaDataBot/0.1 (+https://github.com/Hredo/zarpa; catalogo de fauna)"
 
 # --- Qué especies entran -----------------------------------------------------
 

@@ -1,0 +1,27 @@
+name: Dato incorrecto
+description: Una especie, raza, foto, sonido o dato de una ficha que no cuadra
+labels: [datos]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Zarpa solo muestra datos verificados. Si uno está mal, casi siempre el arreglo
+        está en la fuente (iNaturalist, Wikidata, GBIF…) o en una regla de `tools/`.
+        Cuantos más detalles, antes se corrige.
+  - type: input
+    id: especie
+    attributes:
+      label: Especie o raza
+      description: Nombre científico si lo sabes.
+      placeholder: "Vulpes vulpes"
+    validations: { required: true }
+  - type: textarea
+    id: dato
+    attributes:
+      label: Qué dato está mal y qué debería decir
+    validations: { required: true }
+  - type: input
+    id: fuente
+    attributes:
+      label: Fuente que lo demuestra
+      description: Enlace a la autoridad de ese dato (WoRMS, UICN, FCI, una publicación…).

@@ -1,0 +1,74 @@
+# Comprobación en cada empujón a main o develop y en cada PR: que los tipos
+# cuadran, el lint y las pruebas de la app, y las reglas de Firebase contra sus
+# emuladores. El APK no se compila aquí: lleva los modelos de IA (160 MB, fuera
+# de git) y se prueba en un móvil antes de publicarlo.
+name: ci
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+# Solo lee el repositorio: si un paso se viera comprometido, el token no le
+# deja escribir nada.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App (tipos, lint y pruebas)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    env:
+      # Los binarios nativos de ExecuTorch solo hacen falta para compilar el APK.
+      RNET_SKIP_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Sin el catálogo generado (tools/out, fuera de git) las pruebas que lo
+      # consultan se saltan con un aviso; el resto corre entero.
+      - run: pnpm test --ci
+
+  firebase:
+    name: Reglas de Firebase (emuladores)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: firebase
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: firebase/pnpm-lock.yaml
+      # Los emuladores de Firestore y Storage son Java.
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test

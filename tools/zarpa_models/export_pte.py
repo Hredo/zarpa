@@ -17,7 +17,7 @@ Entorno: ~/.et14 (executorch==1.4.1, el runtime que trae react-native-executorch
 `flatc` (FLATC_EXECUTABLE), como documentó el TFG.
 
 Uso:
-  FLATC_EXECUTABLE=C:/Users/Hrval/.etorch/Scripts/flatc.exe \
+  FLATC_EXECUTABLE=~/.etorch/Scripts/flatc.exe \
   ~/.et14/Scripts/python -m zarpa_models.export_pte --model bioclip --quant int8
 """
 

@@ -1,0 +1,51 @@
+name: Informar de un fallo
+description: Algo no funciona, se cierra o se ve mal
+labels: [fallo]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por avisar. Si la app se cerró, al volver a abrirla te ofrece
+        **Compartir el error**: pega ese texto abajo, es lo que más ayuda.
+        Si es una vulnerabilidad, no la publiques aquí: ver SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Versión de la app
+      description: El nombre del APK o la release que instalaste.
+      placeholder: "0.1.0"
+    validations: { required: true }
+  - type: input
+    id: movil
+    attributes:
+      label: Móvil y sistema
+      placeholder: "Samsung Galaxy S22 Ultra, Android 14"
+    validations: { required: true }
+  - type: dropdown
+    id: origen
+    attributes:
+      label: Cómo la instalaste
+      options:
+        - APK de las Releases
+        - Compilada desde el código
+    validations: { required: true }
+  - type: textarea
+    id: que-pasa
+    attributes:
+      label: Qué pasa
+      description: Qué esperabas y qué ocurrió en su lugar.
+    validations: { required: true }
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Cómo reproducirlo
+      placeholder: |
+        1. Abrir el visor
+        2. Pulsar el botón de zoom 10×
+        3. Se cierra la app
+  - type: textarea
+    id: error
+    attributes:
+      label: Texto del error
+      description: El de «Compartir el error», o el registro de `adb logcat` si lo tienes.
+      render: text

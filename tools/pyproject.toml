@@ -1,7 +1,7 @@
 [project]
 name = "zarpa-tools"
 version = "0.1.0"
-description = "Add your description here"
+description = "Genera el catálogo de especies de Zarpa y los modelos de reconocimiento a partir de fuentes abiertas."
 requires-python = ">=3.13"
 dependencies = [
     "babel>=2.18.0",

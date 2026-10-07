@@ -1,0 +1,21 @@
+# Dependabot vigila las GitHub Actions de los workflows.
+#
+# Van fijadas a un commit concreto (no a una etiqueta que se puede mover), así
+# que sin esto se quedarían congeladas para siempre. Una vez por semana abre una
+# sola PR contra develop con todas las que tengan versión nueva.
+#
+# Las dependencias de la app no entran a propósito: Expo fija las versiones
+# compatibles con cada SDK y se suben con `pnpm exec expo install --fix`,
+# probando la app en un móvil.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci

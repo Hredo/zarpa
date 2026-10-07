@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Avisar de una vulnerabilidad
+    url: https://github.com/Hredo/zarpa/security/advisories/new
+    about: En privado, nunca en un issue público.
