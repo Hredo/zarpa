@@ -9,7 +9,7 @@ const ENCODER: number = require('../../assets/models/bioclip_int8.pte');
 const INDEX: number = require('../../assets/models/species_index.bin');
 
 export const BUNDLED_MODEL: SpeciesModel | null = {
-  id: 'bioclip-int8-2ed8cc981b',
+  id: 'bioclip-int8-49fabca89b',
   encoder: { kind: 'asset', module: ENCODER },
   index: { kind: 'asset', module: INDEX },
   thresholds: {"class": 0.1904, "order": 0.4315, "family": 0.6217, "genus": 0.8346, "species": 0.9772},
