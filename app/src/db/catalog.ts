@@ -137,6 +137,18 @@ export async function getSpeciesByIds(ids: number[]): Promise<SpeciesRow[]> {
   );
 }
 
+export type FaunaRow = SpeciesRow & { class_sci: string | null; order_sci: string | null; medium: number; activity: string | null };
+
+/** Filas de lista con lo que hace falta para saber cómo le afecta el tiempo (clase, orden, medio, actividad). */
+export async function getFaunaByIds(ids: number[]): Promise<FaunaRow[]> {
+  if (ids.length === 0) return [];
+  return catalog().getAllAsync<FaunaRow>(
+    `SELECT ${LIST_COLUMNS}, s.class_sci, s.order_sci, s.medium, d.activity
+     FROM species_v s LEFT JOIN detail d ON d.id = s.id WHERE s.id IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(ids)],
+  );
+}
+
 /** Galería con autoría y licencia (del trozo de Hosting; vacía sin red). */
 export async function getImages(id: number): Promise<SpeciesImage[]> {
   return imagesOf(await speciesExtra(id));
