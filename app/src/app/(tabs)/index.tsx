@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '@/components/Card';
 import { CalendarCard } from '@/components/cards/CalendarCard';
 import { ExcursionCard } from '@/components/cards/ExcursionCard';
+import { WeatherFaunaCard } from '@/components/cards/WeatherFaunaCard';
 import { Cromo, listThumb } from '@/components/Cromo';
 import { GroupPill } from '@/components/GroupPill';
 import { GroupTile } from '@/components/GroupTile';
@@ -52,8 +53,9 @@ function greeting(): string {
 
 /*
  * Inicio: acogedor y con una sola acción clara. De arriba abajo: saludo con el
- * logo, el botón grande de Avistar, la especie del día con foto grande, lo que
- * vive cerca de ti, tu progreso y un acceso rápido por grupos. Es una pantalla
+ * logo, el botón grande de Avistar, la especie del día con foto grande, el
+ * tiempo de hoy con los animales que salen con él, lo que vive cerca de ti,
+ * tu progreso y un acceso rápido por grupos. Es una pantalla
  * que se abre pocas veces al día y no se recicla, así que entra escalonada.
  */
 export default function Inicio() {
@@ -264,6 +266,12 @@ export default function Inicio() {
           </Section>
         </Appear>
       ) : null}
+
+      <Appear index={3}>
+        <Section title="El tiempo hoy" icon="cloudSun" accent={palette.sky} tint={palette.skyTint}>
+          <WeatherFaunaCard coords={coords} noPerm={nearbyState === 'noperm'} onAskLocation={askLocation} onOpen={open} gutter={GUTTER} />
+        </Section>
+      </Appear>
 
       <Appear index={3}>
         <Section title="Para hoy" icon="calendar" accent={palette.leaf} tint={palette.leafTint}>

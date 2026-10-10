@@ -373,9 +373,9 @@ function Table({ a, b }: { a: Loaded; b: Loaded }) {
 }
 
 /**
- * Huellas y láminas de las dos especies, lado a lado: lo que más ayuda a
- * distinguirlas en el campo (la huella) y en detalle (cráneo, esqueleto,
- * láminas). De Wikimedia Commons; cada imagen se abre a pantalla completa.
+ * Láminas anatómicas de las dos especies, lado a lado (cráneo, esqueleto,
+ * vistas de los artículos): para distinguirlas en detalle. De libros y
+ * artículos científicos; cada lámina se abre a pantalla completa.
  */
 function PlatesCompare({ a, b }: { a: Loaded; b: Loaded }) {
   const palette = usePalette();
@@ -388,29 +388,19 @@ function PlatesCompare({ a, b }: { a: Loaded; b: Loaded }) {
   const loading = pa === undefined || pb === undefined;
   const offline = pa === null || pb === null;
   return (
-    <Section title="Huellas y láminas" icon="rastro" accent={palette.brandInk} tint={palette.brandTint}>
+    <Section title="Láminas anatómicas" icon="image" accent={palette.brandInk} tint={palette.brandTint}>
       {loading ? (
-        <ActivityIndicator color={palette.brand} accessibilityLabel="Cargando huellas y láminas" />
+        <ActivityIndicator color={palette.brand} accessibilityLabel="Cargando láminas anatómicas" />
       ) : (
         <>
-          <Txt variant="subheading" style={styles.note}>
-            Huellas
-          </Txt>
           <View style={styles.cols}>
-            <PlateColumn items={pa?.tracks ?? []} width={colW} tint={ga.tint} title={`Huellas de ${displayName(a.sp).name}`} empty={pa === null ? 'Sin conexión' : 'Sin huellas en Commons'} />
-            <PlateColumn items={pb?.tracks ?? []} width={colW} tint={gb.tint} title={`Huellas de ${displayName(b.sp).name}`} empty={pb === null ? 'Sin conexión' : 'Sin huellas en Commons'} />
-          </View>
-          <Txt variant="subheading" style={styles.note}>
-            Láminas y anatomía
-          </Txt>
-          <View style={styles.cols}>
-            <PlateColumn items={pa?.drawings ?? []} width={colW} tint={ga.tint} title={`Láminas de ${displayName(a.sp).name}`} empty={pa === null ? 'Sin conexión' : 'Sin láminas en Commons'} />
-            <PlateColumn items={pb?.drawings ?? []} width={colW} tint={gb.tint} title={`Láminas de ${displayName(b.sp).name}`} empty={pb === null ? 'Sin conexión' : 'Sin láminas en Commons'} />
+            <PlateColumn items={pa ?? []} width={colW} tint={ga.tint} title={`Láminas de ${displayName(a.sp).name}`} empty={pa === null ? 'Sin conexión' : 'Sin láminas publicadas'} />
+            <PlateColumn items={pb ?? []} width={colW} tint={gb.tint} title={`Láminas de ${displayName(b.sp).name}`} empty={pb === null ? 'Sin conexión' : 'Sin láminas publicadas'} />
           </View>
           <Txt variant="small" tone="faint" style={styles.note}>
             {offline
               ? 'Sin conexión: se verán cuando vuelva la red.'
-              : 'De Wikimedia Commons, clasificadas por su comunidad. Toca una para verla en grande con su autor y licencia.'}
+              : 'De libros escaneados y artículos científicos con licencia libre. Toca una para verla en grande con su pie y su origen.'}
           </Txt>
         </>
       )}

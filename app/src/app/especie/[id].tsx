@@ -185,9 +185,9 @@ export default function Ficha() {
     sightingsOf(speciesId).then(setMine);
   }, [speciesId, caughtCount]);
 
-  // Huellas y láminas anatómicas de Commons (se piden cuando ya se sabe su ficha de Wikidata).
+  // Láminas anatómicas de libros y artículos (se piden cuando ya se sabe su ficha de Wikidata).
   const plates = usePlates(sp ? sp.sci : null, sp?.complete ? sp.wd : null);
-  const hasPlates = !!plates && (plates.tracks.length > 0 || plates.drawings.length > 0);
+  const hasPlates = !!plates && plates.length > 0;
 
   useEffect(() => {
     seasonality(speciesId, near ?? undefined).then(setSeason);
@@ -526,7 +526,7 @@ export default function Ficha() {
 
           {hasPlates && plates ? (
             <Appear index={ix()}>
-              <Section title="Huellas y láminas" icon="rastro" accent={g.ink} tint={g.tint}>
+              <Section title="Láminas anatómicas" icon="image" accent={g.ink} tint={g.tint}>
                 <PlatesSection plates={plates} group={g} />
               </Section>
             </Appear>

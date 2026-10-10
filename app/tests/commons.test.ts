@@ -1,6 +1,5 @@
+import { anatomyCategories, bookSource, captionIsAbout, interleave, isAnatomyCaption, parseZenodoFigures } from '@/lib/anatomy';
 import {
-  anatomyDetailCategories,
-  classifyCategories,
   looksLikeDrawing,
   mergeMedia,
   parseAudioPages,
@@ -11,34 +10,94 @@ import {
 import { commonsToSounds, mergeSounds, parseSounds, type RawObservation } from '@/lib/sounds';
 import { withUserAgent } from '@/lib/urls';
 
-describe('categorías de Commons', () => {
-  it('separa huellas, anatomía y láminas, y deja fuera el arte', () => {
-    const cats = classifyCategories([
-      'Category:Vulpes vulpes anatomy',
-      'Category:Vulpes vulpes in art',
-      'Category:Vulpes vulpes tracks',
-      'Category:Sus scrofa (illustrations)',
-      'Category:Roe deer tracks',
-      'Category:Vulpes vulpes feces',
-      'Category:Boars on stamps',
-      'Category:Vulpes vulpes skulls',
-    ]);
-    expect(cats.tracks).toEqual(['Category:Vulpes vulpes tracks', 'Category:Roe deer tracks']);
-    expect(cats.anatomy).toEqual(['Category:Vulpes vulpes anatomy', 'Category:Vulpes vulpes skulls']);
-    expect(cats.drawings).toEqual(['Category:Sus scrofa (illustrations)']);
+describe('láminas anatómicas de libros (Commons)', () => {
+  it('solo baja a las categorías de anatomía, esqueleto y cráneo, sin huellas ni arte', () => {
+    expect(
+      anatomyCategories([
+        'Category:Vulpes vulpes anatomy',
+        'Category:Vulpes vulpes in art',
+        'Category:Vulpes vulpes tracks',
+        'Category:Sus scrofa (illustrations)',
+        'Category:Vulpes vulpes feces',
+        'Category:Vulpes vulpes skulls',
+        'Category:Red fox tails',
+        'Category:Vulpes vulpes teeth',
+      ]),
+    ).toEqual(['Category:Vulpes vulpes anatomy', 'Category:Vulpes vulpes skulls', 'Category:Vulpes vulpes teeth']);
   });
 
-  it('de la anatomía solo baja a esqueleto, cráneo, huesos y dientes', () => {
-    expect(
-      anatomyDetailCategories(['Category:Red fox tails', 'Category:Vulpes vulpes bones', 'Category:Vulpes vulpes heads', 'Category:Vulpes vulpes teeth']),
-    ).toEqual(['Category:Vulpes vulpes bones', 'Category:Vulpes vulpes teeth']);
+  it('distingue una lámina publicada de una foto propia por su origen', () => {
+    expect(bookSource('File:British Pleistocene Mammalia (1866) Red Fox Cranium.png', 'Plate III in: A monograph of the British Pleistocene Mammalia', '1909')).toEqual({
+      source: 'Plate III in: A monograph of the British Pleistocene Mammalia',
+      year: 1909,
+    });
+    expect(bookSource('File:Vpusillaskull.jpg', 'Fig. 37 on p. 125 in: Dogs, jackals, wolves and foxes', '1890')?.year).toBe(1890);
+    expect(bookSource('File:Rotfuchsschädel.jpg', 'Own work', '2004-06-27')).toBeNull();
+    expect(bookSource('File:Red fox skull (55367556835).jpg', 'Red fox skull', 'Taken on 20 June 2026, 11:48:10')).toBeNull();
+    expect(bookSource('File:Vulpes vulpes 11zz.jpg', 'source: David Stang. First published at ZipcodeZoo.com', '2005-11-12')).toBeNull();
   });
 
   it('reconoce láminas por formato o por título', () => {
     expect(looksLikeDrawing('File:Redfoxpaws.png', 'image/png')).toBe(true);
     expect(looksLikeDrawing('File:Meyers b6 s0767 b1.jpg', 'image/jpeg')).toBe(true);
-    expect(looksLikeDrawing('File:Trittsiegel Fuchs 1.jpg', 'image/jpeg')).toBe(true);
     expect(looksLikeDrawing('File:29-05-2021 Wandlitz toter Rotfuchs 08.jpg', 'image/jpeg')).toBe(false);
+  });
+});
+
+describe('figuras de artículos (Biodiversity Literature Repository)', () => {
+  const hit = (id: number, description: string, license = 'cc-by-4.0') => ({
+    id,
+    links: { self_html: `https://zenodo.org/records/${id}`, thumbnails: { '250': `https://z/${id}/250.jpg`, '1200': `https://z/${id}/1200.jpg` } },
+    files: [{ key: 'figure.png' }],
+    metadata: {
+      title: `Fig. 1 in Novos registos de Lucanus cervus para Portugal`,
+      description,
+      publication_date: '2012-02-17',
+      license: { id: license },
+      creators: [{ name: 'Ferreira, Raul Nascimento' }],
+      journal: { title: 'Arquivos Entomolóxicos' },
+    },
+  });
+
+  it('el pie tiene que hablar de la especie al principio, con su nombre o abreviado', () => {
+    expect(captionIsAbout('Figura 1.- Habitus de Lucanus cervus (Linnaeus, 1758).', 'Lucanus cervus')).toBe(true);
+    expect(captionIsAbout('Fig. 4. Skull of B. bufo in ventral view', 'Bufo bufo')).toBe(true);
+    expect(captionIsAbout('Fig. 2. Andrya rhopalocephala (Riehm, 1881) from Lepus europaeus Pallas.', 'Vulpes vulpes')).toBe(false);
+  });
+
+  it('acepta anatomía y rechaza mapas, gráficas, árboles y parásitos', () => {
+    expect(isAnatomyCaption('Figure 3. The phallus morphology of Lepus europaeus in Turkey: A) dorsal, B) ventral, C) lateral view.')).toBe(true);
+    expect(isAnatomyCaption('Fig. 1. Hyla arborea (European tree frog), dorsal view')).toBe(true);
+    expect(isAnatomyCaption('FIGURE 56. Range map of Vulpes vulpes in Korea.')).toBe(false);
+    expect(isAnatomyCaption('Figure 3. Bayesian Inference tree retrieved from the mitochondrial dataset, head of clade')).toBe(false);
+    expect(isAnatomyCaption('Fig. 2. Andrya rhopalocephala from Lepus europaeus. A – mature proglottid, ventral')).toBe(false);
+  });
+
+  it('lee la figura con su artículo, autores, año y licencia, y descarta lo no libre', () => {
+    const figs = parseZenodoFigures(
+      [
+        hit(1, 'Figura 1.- Habitus de Lucanus cervus (Linnaeus, 1758). a.- ♂ de Avelar; c.- ♀ de Avelar.'),
+        hit(2, 'Figura 2.- Habitus de Lucanus cervus, vista dorsal.', 'notspecified'),
+        hit(3, 'Fig. 3. Distribution map of Lucanus cervus in Portugal.'),
+      ],
+      'Lucanus cervus',
+    );
+    expect(figs).toHaveLength(1);
+    expect(figs[0]).toMatchObject({
+      title: 'zenodo:1',
+      url: 'https://z/1/1200.jpg',
+      thumb: 'https://z/1/250.jpg',
+      kind: 'articulo',
+      license: 'CC BY 4.0',
+      author: 'Ferreira, Raul Nascimento',
+      year: 2012,
+      source: 'Novos registos de Lucanus cervus para Portugal · Arquivos Entomolóxicos',
+    });
+  });
+
+  it('alterna libros y artículos sin repetir', () => {
+    const m = (title: string) => ({ title }) as CommonsMedia;
+    expect(interleave([m('a'), m('b'), m('c')], [m('x')], 3).map((x) => x.title)).toEqual(['a', 'x', 'b']);
   });
 });
 

@@ -17,6 +17,15 @@ export type Weather = {
   isDay: boolean;
   /** Instante de la medida (ISO, UTC). */
   at: string;
+  /** Lluvia o nieve de la última hora (mm), si se pidió. */
+  precipMm?: number | null;
+  /** Cielo cubierto (%), si se pidió. */
+  cloud?: number | null;
+  /** Salida y puesta del sol de hoy (hora local «2026-10-10T08:05»), si se pidieron. */
+  sunrise?: string | null;
+  sunset?: string | null;
+  /** Hora local del lugar al medir («2026-10-10T13:15»). */
+  localTime?: string | null;
 };
 
 export const WEATHER_CREDIT = 'Datos meteorológicos: Open-Meteo.com (CC BY 4.0)';
@@ -50,14 +59,25 @@ type OpenMeteoCurrent = {
     wind_speed_10m?: number;
     weather_code?: number;
     is_day?: number;
+    precipitation?: number;
+    cloud_cover?: number;
   };
+  daily?: { sunrise?: string[]; sunset?: string[] };
 };
 
 /** Lee la respuesta de Open-Meteo; `null` si falta lo esencial (nunca inventa un valor). */
 export function parseCurrentWeather(json: unknown, now = new Date()): Weather | null {
-  const c = (json as OpenMeteoCurrent | null)?.current;
+  const j = json as OpenMeteoCurrent | null;
+  const c = j?.current;
   if (!c || typeof c.temperature_2m !== 'number' || typeof c.weather_code !== 'number') return null;
+  const extra: Partial<Weather> = {};
+  if (typeof c.precipitation === 'number') extra.precipMm = c.precipitation;
+  if (typeof c.cloud_cover === 'number') extra.cloud = c.cloud_cover;
+  if (j?.daily?.sunrise?.[0]) extra.sunrise = j.daily.sunrise[0];
+  if (j?.daily?.sunset?.[0]) extra.sunset = j.daily.sunset[0];
+  if (typeof c.time === 'string') extra.localTime = c.time;
   return {
+    ...extra,
     code: c.weather_code,
     tempC: c.temperature_2m,
     feelsC: typeof c.apparent_temperature === 'number' ? c.apparent_temperature : null,
@@ -72,6 +92,15 @@ export function weatherUrl(lat: number, lng: number): string {
   return (
     `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}` +
     `&current=temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m&timezone=auto`
+  );
+}
+
+/** Como `weatherUrl`, con lluvia, nubes y la salida y puesta del sol (para «qué sale con este tiempo»). */
+export function weatherNowUrl(lat: number, lng: number): string {
+  return (
+    `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}` +
+    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m,precipitation,cloud_cover` +
+    `&daily=sunrise,sunset&forecast_days=1&timezone=auto`
   );
 }
 
