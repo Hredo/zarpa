@@ -1,72 +1,46 @@
+import { bookSource, type PlateKind } from './anatomy';
+
 /*
- * Wikimedia Commons: huellas, láminas anatómicas y grabaciones de cada especie.
+ * Wikimedia Commons: láminas anatómicas de libros escaneados (ver `anatomy.ts`)
+ * y grabaciones de cada especie.
  *
  * Commons ordena sus archivos en categorías que la comunidad mantiene a mano y
- * con nombres estables bajo la de cada especie («Vulpes vulpes tracks»,
- * «Vulpes vulpes anatomy», «Sus scrofa (illustrations)»). Es la fuente que
- * usa la app: lo que está en esas categorías lo ha clasificado una persona, no
- * una búsqueda por palabras. Todo Commons es contenido libre (también para uso
- * comercial); aun así se descarta lo marcado como no libre y siempre se
- * muestran autor y licencia con enlace al original.
+ * con nombres estables bajo la de cada especie («Vulpes vulpes skulls»,
+ * «Rana temporaria anatomy»). Lo que está en esas categorías lo ha clasificado
+ * una persona, no una búsqueda por palabras. Se descarta lo marcado como no
+ * libre y siempre se muestran autor, fuente y licencia con enlace al original.
  *
- * Aquí solo está la lógica pura (qué categoría es qué, qué archivo es un
- * dibujo, cómo se lee la autoría); las peticiones están en `commonsRemote.ts`.
+ * Aquí solo está la lógica pura; las peticiones están en `commonsRemote.ts` y
+ * `anatomyRemote.ts`.
  */
 
 export type CommonsMedia = {
-  /** «File:Fuchs Fährte.jpg» */
+  /** «File:Fuchs Schädel.jpg» o «zenodo:12644122»: identifica el archivo. */
   title: string;
-  /** Imagen para la vista grande (miniatura de 960 px o el original si es menor). */
+  /** Imagen para la vista grande (miniatura de 960–1200 px o el original si es menor). */
   url: string;
-  /** Miniatura para las filas (330 px, ancho estándar de Wikimedia). */
+  /** Miniatura para las filas. */
   thumb: string;
   /** alto / ancho, si se conoce. */
   ratio: number | null;
   author: string | null;
   license: string;
   licenseUrl: string | null;
-  /** Página del archivo en Commons (autoría completa y original). */
+  /** Página del original (Commons o Zenodo) con la autoría completa. */
   page: string;
   /** Dibujo, lámina o esquema (no fotografía). */
   drawing: boolean;
+  /** De dónde sale la lámina: un libro escaneado o un artículo científico. */
+  kind?: PlateKind;
+  /** Obra de la que sale («A monograph of the Canidae (1890)», título del artículo y revista). */
+  source?: string | null;
+  /** Pie de figura original del artículo. */
+  caption?: string | null;
+  year?: number | null;
 };
-
-export type Plates = {
-  /** Huellas y rastros. */
-  tracks: CommonsMedia[];
-  /** Láminas: dibujos anatómicos (esqueleto, cráneo, órganos) y del animal entero. */
-  drawings: CommonsMedia[];
-};
-
-export type PlateCategories = { tracks: string[]; anatomy: string[]; drawings: string[] };
-
-const TRACKS = /\b(tracks?|footprints?|foot prints?|pawprints?|paw prints?|spoors?|trackways?|trails? in snow)\b/i;
-const ANATOMY = /\b(anatomy|skeletons?|skulls?|crania|bones|osteology|dentition|teeth)\b/i;
-const DRAWINGS = /\((illustrations|drawings)\)|\b(illustrations|drawings|line art|scientific illustrations?|plates)\b/i;
-/** Arte, sellos, heráldica…: representaciones, no material para identificar. */
-const NOT_REFERENCE = /\b(in art|in heraldry|on stamps|stamps|coins|cartoons?|logos?|sculptures?|toys|statues?|paintings)\b/i;
-/** Dentro de «anatomía», lo que no son láminas (fotos de heces, colas, cabezas vivas). */
-const ANATOMY_SKIP = /\b(feces|faeces|scats?|droppings|tails|heads|eyes|juvenile|fur|feathers|claws|wings)\b/i;
-
-/** Clasifica las subcategorías de la categoría de una especie. */
-export function classifyCategories(titles: readonly string[]): PlateCategories {
-  const out: PlateCategories = { tracks: [], anatomy: [], drawings: [] };
-  for (const t of titles) {
-    if (NOT_REFERENCE.test(t)) continue;
-    if (TRACKS.test(t)) out.tracks.push(t);
-    else if (ANATOMY.test(t) && !ANATOMY_SKIP.test(t)) out.anatomy.push(t);
-    else if (DRAWINGS.test(t)) out.drawings.push(t);
-  }
-  return out;
-}
-
-/** Subcategorías de «X anatomy» que son láminas (huesos, cráneo, esqueleto), no fotos sueltas. */
-export function anatomyDetailCategories(titles: readonly string[]): string[] {
-  return titles.filter((t) => /\b(skeletons?|skulls?|crania|bones|osteology|dentition|teeth)\b/i.test(t) && !NOT_REFERENCE.test(t));
-}
 
 const DRAWING_TITLE =
-  /(tafel|plate|planche|l[áa]mina|\bpl\.|\bfig\.?|figure|illustrat|drawing|zeichnung|dessin|dibujo|engraving|gravure|lithograph|woodcut|holzschnitt|sketch|diagram|schema|scheme|anatom|skelet|skull|sch[äa]del|cr[áa]neo|\bcr[âa]ne|EB1911|Meyers|Brehm|Naumann|Cuvier|Wellcome|Gould|Audubon|Buffon|Lydekker|Biodiversity Heritage|\bBHL\b|Trittsiegel|Spurenbild)/i;
+  /(tafel|plate|planche|l[áa]mina|\bpl\.|\bfig\.?|figure|illustrat|drawing|zeichnung|dessin|dibujo|engraving|gravure|lithograph|woodcut|holzschnitt|sketch|diagram|schema|scheme|anatom|skelet|skull|sch[äa]del|cr[áa]neo|\bcr[âa]ne|EB1911|Meyers|Brehm|Naumann|Cuvier|Wellcome|Gould|Audubon|Buffon|Lydekker|Biodiversity Heritage|\bBHL\b)/i;
 const DRAWING_MIME = /^image\/(svg\+xml|png|gif|tiff)$/i;
 
 /** ¿Es un dibujo o lámina? Por el formato (SVG, PNG…) o por el título (lámina, figura, autor de láminas clásico). */
@@ -123,8 +97,15 @@ function isNonFree(m: ExtMeta | undefined): boolean {
   return v != null && v !== '' && v !== 'false';
 }
 
-/** Archivos de imagen de una respuesta `prop=imageinfo` (solo imágenes libres). `drawingOnly`: solo dibujos. */
-export function parseImagePages(pages: readonly RawImagePage[] | undefined, opts: { drawing?: 'all' | 'only' | 'detect' } = {}): CommonsMedia[] {
+/**
+ * Archivos de imagen de una respuesta `prop=imageinfo` (solo imágenes libres).
+ * `drawing: 'only'` deja solo dibujos; `published: true`, solo láminas de libros
+ * y revistas (no fotos propias), con su obra de origen.
+ */
+export function parseImagePages(
+  pages: readonly RawImagePage[] | undefined,
+  opts: { drawing?: 'all' | 'only' | 'detect'; published?: boolean } = {},
+): CommonsMedia[] {
   const mode = opts.drawing ?? 'detect';
   const out: CommonsMedia[] = [];
   for (const p of pages ?? []) {
@@ -138,6 +119,8 @@ export function parseImagePages(pages: readonly RawImagePage[] | undefined, opts
     if (!license) continue;
     const drawing = mode === 'all' ? true : looksLikeDrawing(p.title, mime);
     if (mode === 'only' && !drawing) continue;
+    const book = opts.published ? bookSource(p.title, metaString(meta, 'Credit'), metaString(meta, 'DateTimeOriginal')) : null;
+    if (opts.published && !book) continue;
     const url = cleanUrl(ii.thumburl ?? ii.url);
     out.push({
       title: p.title,
@@ -149,6 +132,7 @@ export function parseImagePages(pages: readonly RawImagePage[] | undefined, opts
       licenseUrl: metaString(meta, 'LicenseUrl'),
       page: ii.descriptionurl ?? `https://commons.wikimedia.org/wiki/${encodeURIComponent(p.title.replace(/ /g, '_'))}`,
       drawing,
+      ...(book ? { kind: 'libro' as const, source: book.source, year: book.year } : null),
     });
   }
   return out;

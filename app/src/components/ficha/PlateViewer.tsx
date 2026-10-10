@@ -18,7 +18,8 @@ const MAX_SCALE = 6;
 /**
  * Lámina o huella a pantalla completa, para ver los detalles: pellizcar para
  * acercar (hasta 6×), arrastrar para moverse y doble toque para acercar o
- * volver. Debajo, autor y licencia con enlace al archivo en Commons.
+ * volver. Debajo, el pie de figura, la obra de la que sale, autor y licencia
+ * con enlace al original (Commons o Zenodo).
  *
  * API: `<PlateViewer items={lista} index={i} onIndex={setI} onClose={…} />`
  * (`index` null = cerrado).
@@ -77,15 +78,31 @@ export function PlateViewer({
                   <Icon name="chevronRight" color={palette.onStrong} />
                 </Press>
               </View>
+              {item.caption || item.source ? (
+                <View style={[styles.info, { backgroundColor: palette.scrim }]}>
+                  {item.caption ? (
+                    <Txt variant="small" tone="onStrong" numberOfLines={5}>
+                      {item.caption}
+                    </Txt>
+                  ) : null}
+                  {item.source ? (
+                    <Txt variant="small" tone="onStrongSoft" numberOfLines={2}>
+                      {item.kind === 'articulo' ? 'Artículo: ' : 'Libro: '}
+                      {item.source}
+                      {item.year ? ` (${item.year})` : ''}
+                    </Txt>
+                  ) : null}
+                </View>
+              ) : null}
               <Press
                 onPress={() => WebBrowser.openBrowserAsync(item.page)}
                 accessibilityRole="link"
-                accessibilityLabel="Abrir el original en Wikimedia Commons"
+                accessibilityLabel={`Abrir el original en ${host(item)}`}
                 style={[styles.credit, { backgroundColor: palette.scrim }]}>
                 <Icon name="external" size={16} color={palette.onStrong} />
                 <Txt variant="small" tone="onStrong" style={styles.flex} numberOfLines={2}>
                   {item.author ? `${item.author} · ` : ''}
-                  {item.license} · Wikimedia Commons
+                  {item.license} · {host(item)}
                 </Txt>
               </Press>
             </View>
@@ -94,6 +111,10 @@ export function PlateViewer({
       </GestureHandlerRootView>
     </Modal>
   );
+}
+
+function host(item: CommonsMedia): string {
+  return item.page.includes('zenodo.org') ? 'Zenodo' : 'Wikimedia Commons';
 }
 
 /** Imagen con zoom y desplazamiento en el hilo de la interfaz. */
@@ -161,7 +182,7 @@ function ZoomImage({ item }: { item: CommonsMedia }) {
 
   return (
     <GestureDetector gesture={Gesture.Exclusive(doubleTap, Gesture.Simultaneous(pinch, pan))}>
-      <Animated.View style={[styles.fill, styles.paperWrap, style]} accessible accessibilityLabel={item.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '')}>
+      <Animated.View style={[styles.fill, styles.paperWrap, style]} accessible accessibilityLabel={item.caption ?? item.source ?? item.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '')}>
         <View style={[styles.paper, !loaded && styles.paperLoading]}>
           <FadeImage
             source={item.url}
@@ -188,5 +209,6 @@ const styles = StyleSheet.create({
   counter: { flexShrink: 1, minHeight: 32, justifyContent: 'center', paddingHorizontal: space.md, borderRadius: radius.pill },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, gap: space.sm, paddingHorizontal: space.lg },
   nav: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  info: { gap: space.xs, paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.md },
   credit: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 44, paddingHorizontal: space.md, borderRadius: radius.md },
 });
